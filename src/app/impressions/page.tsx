@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import {
   LineChart,
   Line,
@@ -15,126 +15,146 @@ import {
 } from 'recharts'
 import { MetricCard } from '@/components/MetricCard'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
-import { PlatformSelect } from '@/components/PlatformSelect'
-import { generateSampleImpressions, generateSampleInstalls } from '@/lib/sample-data'
 
 export default function ImpressionsPage() {
   const [dateRange, setDateRange] = useState('30')
-  const [platform, setPlatform] = useState('All')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [screenData, setScreenData] = useState<any[]>([])
+  const [platformData, setPlatformData] = useState<any[]>([])
+  const [totalViews, setTotalViews] = useState(0)
+  const [uniqueUsers, setUniqueUsers] = useState(0)
 
-  const { impressions, installs, dailyData, platformData } = useMemo(() => {
-    const endDate = new Date()
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - parseInt(dateRange))
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true)
+      setError(null)
 
-    const rawImpressions = generateSampleImpressions(startDate, endDate)
-    const rawInstalls = generateSampleInstalls(startDate, endDate)
+      try {
+        // Fetch raw events to process
+        const eventsRes = await fetch('/api/posthog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queryType: 'events', days: parseInt(dateRange) }),
+        })
 
-    // Filter by platform if needed
-    const filteredImpressions = platform === 'All'
-      ? rawImpressions
-      : rawImpressions.filter(i => i.platform === platform)
-    const filteredInstalls = platform === 'All'
-      ? rawInstalls
-      : rawInstalls.filter(i => i.platform === platform)
+        if (!eventsRes.ok) throw new Error('Failed to fetch events')
+        const eventsData = await eventsRes.json()
+        const events = eventsData.results || []
 
-    // Calculate totals
-    const totalImpressions = filteredImpressions.reduce((sum, i) => sum + i.count, 0)
-    const totalInstalls = filteredInstalls.reduce((sum, i) => sum + i.count, 0)
+        // Filter screen events
+        const screenEvents = events.filter((e: any) => e.event === '$screen')
 
-    // Group by date for line chart
-    const dateMap = new Map<string, { impressions: number; installs: number }>()
-    filteredImpressions.forEach(i => {
-      const date = i.created_at.split('T')[0]
-      const existing = dateMap.get(date) || { impressions: 0, installs: 0 }
-      existing.impressions += i.count
-      dateMap.set(date, existing)
-    })
-    filteredInstalls.forEach(i => {
-      const date = i.created_at.split('T')[0]
-      const existing = dateMap.get(date) || { impressions: 0, installs: 0 }
-      existing.installs += i.count
-      dateMap.set(date, existing)
-    })
+        // Calculate total views
+        setTotalViews(screenEvents.length)
 
-    const dailyData = Array.from(dateMap.entries())
-      .map(([date, data]) => ({ date, ...data }))
-      .sort((a, b) => a.date.localeCompare(b.date))
+        // Calculate unique users
+        const uniqueUserIds = new Set(screenEvents.map((e: any) => e.distinct_id))
+        setUniqueUsers(uniqueUserIds.size)
 
-    // Group by platform for bar chart
-    const platformMap = new Map<string, { impressions: number; installs: number }>()
-    rawImpressions.forEach(i => {
-      const existing = platformMap.get(i.platform) || { impressions: 0, installs: 0 }
-      existing.impressions += i.count
-      platformMap.set(i.platform, existing)
-    })
-    rawInstalls.forEach(i => {
-      const existing = platformMap.get(i.platform) || { impressions: 0, installs: 0 }
-      existing.installs += i.count
-      platformMap.set(i.platform, existing)
-    })
+        // Group by date for daily trends
+        const dateMap = new Map<string, number>()
+        screenEvents.forEach((e: any) => {
+          const date = e.timestamp.split('T')[0]
+          dateMap.set(date, (dateMap.get(date) || 0) + 1)
+        })
 
-    const platformData = Array.from(platformMap.entries())
-      .map(([platform, data]) => ({ platform, ...data }))
+        const dailyData = Array.from(dateMap.entries())
+          .map(([date, count]) => ({ date, views: count }))
+          .sort((a, b) => a.date.localeCompare(b.date))
 
-    return {
-      impressions: totalImpressions,
-      installs: totalInstalls,
-      dailyData,
-      platformData,
+        setScreenData(dailyData)
+
+        // Group by screen name for breakdown
+        const screenMap = new Map<string, number>()
+        screenEvents.forEach((e: any) => {
+          const screenName = e.properties?.$screen_name || 'Unknown'
+          screenMap.set(screenName, (screenMap.get(screenName) || 0) + 1)
+        })
+
+        const screenBreakdown = Array.from(screenMap.entries())
+          .map(([screen, count]) => ({ screen, views: count }))
+          .sort((a, b) => b.views - a.views)
+
+        setPlatformData(screenBreakdown)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load data')
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [dateRange, platform])
 
-  const conversionRate = impressions > 0 ? ((installs / impressions) * 100).toFixed(2) : '0.00'
+    fetchData()
+  }, [dateRange])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Loading PostHog data...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <p className="text-red-800">Error: {error}</p>
+        <p className="text-red-600 text-sm mt-2">Make sure POSTHOG_API_KEY is set in environment variables.</p>
+      </div>
+    )
+  }
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Impressions & Installs</h1>
-        <div className="flex gap-4">
-          <div className="w-40">
-            <DateRangeSelect value={dateRange} onChange={setDateRange} />
-          </div>
-          <div className="w-40">
-            <PlatformSelect value={platform} onChange={setPlatform} />
-          </div>
+        <h1 className="text-2xl font-bold text-gray-900">Screen Views & Engagement</h1>
+        <div className="w-40">
+          <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <MetricCard title="Total Impressions" value={impressions.toLocaleString()} />
-        <MetricCard title="Total Installs" value={installs.toLocaleString()} />
-        <MetricCard title="Conversion Rate" value={`${conversionRate}%`} />
+        <MetricCard title="Total Screen Views" value={totalViews.toLocaleString()} />
+        <MetricCard title="Unique Users" value={uniqueUsers.toLocaleString()} />
+        <MetricCard
+          title="Views per User"
+          value={uniqueUsers > 0 ? (totalViews / uniqueUsers).toFixed(1) : '0'}
+        />
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Daily Trends</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={dailyData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
-            <Legend />
-            <Line type="monotone" dataKey="impressions" stroke="#6366f1" strokeWidth={2} />
-            <Line type="monotone" dataKey="installs" stroke="#10b981" strokeWidth={2} />
-          </LineChart>
-        </ResponsiveContainer>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Daily Screen Views</h2>
+        {screenData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={screenData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="views" stroke="#6366f1" strokeWidth={2} name="Screen Views" />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-gray-500 text-center py-8">No data available for selected period</p>
+        )}
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Platform Breakdown</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={platformData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="platform" tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="impressions" fill="#6366f1" />
-            <Bar dataKey="installs" fill="#10b981" />
-          </BarChart>
-        </ResponsiveContainer>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Views by Screen</h2>
+        {platformData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={platformData} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" tick={{ fontSize: 12 }} />
+              <YAxis dataKey="screen" type="category" tick={{ fontSize: 12 }} width={120} />
+              <Tooltip />
+              <Bar dataKey="views" fill="#6366f1" name="Views" />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-gray-500 text-center py-8">No data available</p>
+        )}
       </div>
     </div>
   )

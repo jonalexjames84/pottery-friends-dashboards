@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import {
   LineChart,
   Line,
@@ -11,151 +11,177 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { MetricCard } from '@/components/MetricCard'
-import { generateSampleRetentionData } from '@/lib/sample-data'
-
-const DAYS = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7']
 
 export default function RetentionPage() {
   const [weeksToShow, setWeeksToShow] = useState('4')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [dailyActiveUsers, setDailyActiveUsers] = useState<any[]>([])
+  const [totalUsers, setTotalUsers] = useState(0)
+  const [sessionsToday, setSessionsToday] = useState(0)
 
-  const { cohorts, latestRetention, avgD1, avgD7, d7Change, retentionCurveData } = useMemo(() => {
-    const numWeeks = parseInt(weeksToShow)
-    const cohorts = generateSampleRetentionData(numWeeks)
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true)
+      setError(null)
 
-    const latestRetention = cohorts[cohorts.length - 1].retention
+      try {
+        const eventsRes = await fetch('/api/posthog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queryType: 'events', days: parseInt(weeksToShow) * 7 }),
+        })
 
-    // Calculate averages
-    const avgD1 = cohorts.reduce((sum, c) => sum + c.retention[1], 0) / cohorts.length
-    const avgD7 = cohorts.reduce((sum, c) => sum + c.retention[7], 0) / cohorts.length
+        if (!eventsRes.ok) throw new Error('Failed to fetch events')
+        const eventsData = await eventsRes.json()
+        const events = eventsData.results || []
 
-    // Week-over-week change for D7
-    const d7Change = cohorts.length > 1
-      ? cohorts[cohorts.length - 1].retention[7] - cohorts[cohorts.length - 2].retention[7]
-      : 0
+        // Get all users
+        const allUsers = new Set(events.map((e: any) => e.distinct_id))
+        setTotalUsers(allUsers.size)
 
-    // Format for retention curve
-    const retentionCurveData = DAYS.map((day, index) => ({
-      day,
-      retention: Math.round(latestRetention[index] * 10) / 10,
-    }))
+        // Group by date for daily active users
+        const dateUserMap = new Map<string, Set<string>>()
+        events.forEach((e: any) => {
+          const date = e.timestamp.split('T')[0]
+          if (!dateUserMap.has(date)) {
+            dateUserMap.set(date, new Set())
+          }
+          dateUserMap.get(date)!.add(e.distinct_id)
+        })
 
-    return { cohorts, latestRetention, avgD1, avgD7, d7Change, retentionCurveData }
+        const dauData = Array.from(dateUserMap.entries())
+          .map(([date, users]) => ({
+            date,
+            dau: users.size,
+          }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+
+        setDailyActiveUsers(dauData)
+
+        // Sessions today
+        const today = new Date().toISOString().split('T')[0]
+        const todayUsers = dateUserMap.get(today)
+        setSessionsToday(todayUsers ? todayUsers.size : 0)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load data')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
   }, [weeksToShow])
 
-  // Find biggest drop-off
-  const drops = DAYS.slice(0, -1).map((_, i) => ({
-    from: DAYS[i],
-    to: DAYS[i + 1],
-    drop: latestRetention[i] - latestRetention[i + 1],
-  }))
-  const biggestDrop = drops.reduce((max, curr) => curr.drop > max.drop ? curr : max)
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Loading PostHog data...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <p className="text-red-800">Error: {error}</p>
+        <p className="text-red-600 text-sm mt-2">Make sure POSTHOG_API_KEY is set in environment variables.</p>
+      </div>
+    )
+  }
+
+  // Calculate average DAU
+  const avgDAU = dailyActiveUsers.length > 0
+    ? Math.round(dailyActiveUsers.reduce((sum, d) => sum + d.dau, 0) / dailyActiveUsers.length)
+    : 0
+
+  // Calculate stickiness (DAU/MAU)
+  const stickiness = totalUsers > 0 ? ((avgDAU / totalUsers) * 100).toFixed(1) : '0'
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">D1-D7 Retention Rate</h1>
+        <h1 className="text-2xl font-bold text-gray-900">User Retention & Activity</h1>
         <div className="w-40">
           <select
             value={weeksToShow}
             onChange={(e) => setWeeksToShow(e.target.value)}
             className="block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
           >
-            <option value="4">Last 4 Weeks</option>
-            <option value="8">Last 8 Weeks</option>
-            <option value="12">Last 12 Weeks</option>
+            <option value="1">Last 7 Days</option>
+            <option value="2">Last 14 Days</option>
+            <option value="4">Last 30 Days</option>
           </select>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <MetricCard
-          title="D1 Retention"
-          value={`${latestRetention[1].toFixed(1)}%`}
-        />
-        <MetricCard
-          title="D3 Retention"
-          value={`${latestRetention[3].toFixed(1)}%`}
-        />
-        <MetricCard
-          title="D7 Retention"
-          value={`${latestRetention[7].toFixed(1)}%`}
-        />
-        <MetricCard
-          title="D7 WoW Change"
-          value={`${d7Change >= 0 ? '+' : ''}${d7Change.toFixed(1)}%`}
-          changeType={d7Change > 0 ? 'positive' : d7Change < 0 ? 'negative' : 'neutral'}
-        />
+        <MetricCard title="Total Users" value={totalUsers.toLocaleString()} />
+        <MetricCard title="Active Today" value={sessionsToday.toLocaleString()} />
+        <MetricCard title="Avg Daily Active" value={avgDAU.toLocaleString()} />
+        <MetricCard title="Stickiness (DAU/MAU)" value={`${stickiness}%`} />
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Retention Curve (Latest Cohort)</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={retentionCurveData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-            <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
-            <Tooltip formatter={(value: number) => `${value}%`} />
-            <Line
-              type="monotone"
-              dataKey="retention"
-              stroke="#6366f1"
-              strokeWidth={3}
-              dot={{ r: 6 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Daily Active Users</h2>
+        {dailyActiveUsers.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={dailyActiveUsers}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Line
+                type="monotone"
+                dataKey="dau"
+                stroke="#6366f1"
+                strokeWidth={3}
+                dot={{ r: 6 }}
+                name="Daily Active Users"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-gray-500 text-center py-8">No activity data available yet</p>
+        )}
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Cohort Retention Matrix</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr className="bg-gray-50">
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cohort</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                {DAYS.map(day => (
-                  <th key={day} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">{day}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {cohorts.map((cohort, index) => (
-                <tr key={index}>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{cohort.cohort}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{cohort.cohortSize.toLocaleString()}</td>
-                  {cohort.retention.map((rate, dayIndex) => {
-                    const intensity = Math.round((rate / 100) * 255)
-                    const bgColor = `rgb(${255 - intensity * 0.4}, ${255 - intensity * 0.2}, 255)`
-                    return (
-                      <td
-                        key={dayIndex}
-                        className="px-4 py-3 text-sm text-center"
-                        style={{ backgroundColor: bgColor }}
-                      >
-                        {rate.toFixed(1)}%
-                      </td>
-                    )
-                  })}
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Activity Log</h2>
+        {dailyActiveUsers.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Active Users</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">% of Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {dailyActiveUsers.slice().reverse().map((row, index) => (
+                  <tr key={index}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.date}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.dau}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {totalUsers > 0 ? ((row.dau / totalUsers) * 100).toFixed(1) : 0}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500 text-center py-8">No data available</p>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 mb-2">Key Metrics</h3>
-          <p className="text-blue-700 mb-1">Average D1 Retention: <strong>{avgD1.toFixed(1)}%</strong></p>
-          <p className="text-blue-700">Average D7 Retention: <strong>{avgD7.toFixed(1)}%</strong></p>
-        </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <h3 className="font-semibold text-amber-800 mb-2">Biggest Drop-off</h3>
-          <p className="text-amber-700">
-            <strong>{biggestDrop.from} → {biggestDrop.to}</strong> ({biggestDrop.drop.toFixed(1)}% decrease)
-          </p>
-        </div>
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+        <h3 className="font-semibold text-amber-800 mb-2">Retention Note</h3>
+        <p className="text-amber-700 text-sm">
+          D1-D7 cohort retention analysis requires at least 7 days of data. As you collect more events,
+          this page will show detailed retention cohorts. Currently showing daily active user trends.
+        </p>
       </div>
     </div>
   )
