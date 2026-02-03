@@ -16,12 +16,23 @@ import {
 } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
 
+function ConfidenceBadge({ sampleSize, label }: { sampleSize: number; label?: string }) {
+  const isSignificant = sampleSize >= 30
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded ${isSignificant ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+      n={sampleSize} {label || (isSignificant ? '(reliable)' : '(low confidence)')}
+    </span>
+  )
+}
+
 export default function RetentionPage() {
   const [dateRange, setDateRange] = useState('30')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dailyActiveUsers, setDailyActiveUsers] = useState<any[]>([])
   const [cohorts, setCohorts] = useState<any[]>([])
+  const [unifiedActive, setUnifiedActive] = useState<any>({})
+  const [resurrection, setResurrection] = useState<any>({})
   const [metrics, setMetrics] = useState({
     totalUsers: 0,
     sessionsToday: 0,
@@ -114,16 +125,34 @@ export default function RetentionPage() {
           peakDate: peakDay.date,
         })
 
-        // Fetch Supabase cohort retention
-        const cohortRes = await fetch('/api/supabase', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ queryType: 'cohortRetention' }),
-        })
+        // Fetch Supabase data in parallel
+        const [cohortRes, unifiedRes, resRes] = await Promise.all([
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'cohortRetention' }),
+          }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'unifiedActiveMembers', days: 7 }),
+          }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'resurrectionRate' }),
+          }),
+        ])
 
         if (cohortRes.ok) {
           const cohortData = await cohortRes.json()
           setCohorts(cohortData.cohorts || [])
+        }
+        if (unifiedRes.ok) {
+          setUnifiedActive(await unifiedRes.json())
+        }
+        if (resRes.ok) {
+          setResurrection(await resRes.json())
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data')
@@ -176,14 +205,43 @@ export default function RetentionPage() {
 
       {/* North Star Metric */}
       <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg p-6 text-white mb-6">
-        <p className="text-emerald-100 text-sm font-medium">KEY METRIC</p>
-        <div className="flex items-baseline gap-4 mt-1">
-          <span className="text-4xl font-bold">{metrics.stickiness}%</span>
-          <span className="text-emerald-100">DAU/MAU Stickiness</span>
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-emerald-100 text-sm font-medium">KEY METRIC (UNIFIED DEFINITION)</p>
+            <div className="flex items-baseline gap-4 mt-1">
+              <span className="text-4xl font-bold">{unifiedActive.activeMembers || metrics.avgDAU}</span>
+              <span className="text-emerald-100">Weekly Active Members</span>
+            </div>
+            <p className="text-emerald-200 text-sm mt-2">
+              {unifiedActive.activityRate || metrics.stickiness}% of {unifiedActive.totalMembers || metrics.totalUsers} total members active (Supabase actions)
+            </p>
+          </div>
+          <ConfidenceBadge sampleSize={unifiedActive.sampleSize || metrics.avgDAU} />
         </div>
-        <p className="text-emerald-200 text-sm mt-2">
-          {metrics.avgDAU} avg daily users out of {metrics.totalUsers} total users
-        </p>
+      </div>
+
+      {/* User Segmentation - New vs Returning */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <p className="text-sm font-medium text-gray-500">New Users Active</p>
+          <p className="text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.newUserActive || 0}</p>
+          <p className="text-xs text-gray-500 mt-1">Joined last 14 days</p>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <p className="text-sm font-medium text-gray-500">Returning Active</p>
+          <p className="text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.returningUserActive || 0}</p>
+          <p className="text-xs text-gray-500 mt-1">Joined 14+ days ago</p>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <p className="text-sm font-medium text-gray-500">Resurrected</p>
+          <p className="text-2xl font-semibold text-green-600 mt-1">{resurrection.resurrectedUsers || 0}</p>
+          <p className="text-xs text-gray-500 mt-1">{resurrection.resurrectionRate || 0}% of churned</p>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <p className="text-sm font-medium text-gray-500">Churned</p>
+          <p className="text-2xl font-semibold text-red-600 mt-1">{resurrection.churnedUsers || 0}</p>
+          <p className="text-xs text-gray-500 mt-1">Inactive 14+ days</p>
+        </div>
       </div>
 
       {/* WoW Metrics */}
@@ -270,8 +328,17 @@ export default function RetentionPage() {
 
       {/* Cohort Retention Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Cohort Retention Matrix</h2>
-        <p className="text-sm text-gray-500 mb-4">% of members active by week after joining</p>
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Cohort Retention Matrix</h2>
+            <p className="text-sm text-gray-500">% of members active by week after joining</p>
+          </div>
+          {cohorts.length > 0 && cohorts.some(c => c.size < 30) && (
+            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
+              Some cohorts have low sample size
+            </span>
+          )}
+        </div>
         {cohorts.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -287,11 +354,14 @@ export default function RetentionPage() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {cohorts.map((cohort: any, index: number) => (
-                  <tr key={index}>
+                  <tr key={index} className={cohort.size < 30 ? 'bg-amber-50' : ''}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {new Date(cohort.cohort).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{cohort.size}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {cohort.size}
+                      {cohort.size < 30 && <span className="text-amber-600 ml-1">*</span>}
+                    </td>
                     {['week0', 'week1', 'week2', 'week3'].map((week) => {
                       const val = cohort[week] || 0
                       const intensity = Math.min(val / 100, 1)
@@ -359,19 +429,33 @@ export default function RetentionPage() {
       </div>
 
       {/* Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-          <h3 className="font-semibold text-emerald-800 mb-1">Stickiness Benchmark</h3>
-          <p className="text-emerald-700 text-sm">
-            {metrics.stickiness >= 20
-              ? `${metrics.stickiness}% is good! Top apps aim for 20%+ DAU/MAU.`
-              : `${metrics.stickiness}% is below benchmark. Target 20%+ for healthy engagement.`}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className={`rounded-lg p-4 ${(unifiedActive.activityRate || metrics.stickiness) >= 20 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+          <h3 className={`font-semibold mb-1 ${(unifiedActive.activityRate || metrics.stickiness) >= 20 ? 'text-green-800' : 'text-amber-800'}`}>
+            Activity Rate
+          </h3>
+          <p className={`text-sm ${(unifiedActive.activityRate || metrics.stickiness) >= 20 ? 'text-green-700' : 'text-amber-700'}`}>
+            {(unifiedActive.activityRate || metrics.stickiness) >= 20
+              ? `${unifiedActive.activityRate || metrics.stickiness}% is healthy! Top community apps target 20%+.`
+              : `${unifiedActive.activityRate || metrics.stickiness}% is below 20% benchmark.`}
+          </p>
+        </div>
+        <div className={`rounded-lg p-4 ${(resurrection.resurrectionRate || 0) >= 10 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+          <h3 className={`font-semibold mb-1 ${(resurrection.resurrectionRate || 0) >= 10 ? 'text-green-800' : 'text-amber-800'}`}>
+            Resurrection Rate
+          </h3>
+          <p className={`text-sm ${(resurrection.resurrectionRate || 0) >= 10 ? 'text-green-700' : 'text-amber-700'}`}>
+            {resurrection.resurrectionRate || 0}% of churned users came back.
+            {(resurrection.resurrectionRate || 0) >= 10
+              ? ' Re-engagement is working!'
+              : ' Consider win-back campaigns.'}
           </p>
         </div>
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 mb-1">Data Sources</h3>
+          <h3 className="font-semibold text-blue-800 mb-1">Unified Definition</h3>
           <p className="text-blue-700 text-sm">
-            DAU from PostHog app events. Cohort retention from Supabase member activity.
+            Active = any Supabase action (post, like, comment, follow). Consistent across all pages.
+            {cohorts.some(c => c.size < 30) && ' * = cohort too small for confidence.'}
           </p>
         </div>
       </div>

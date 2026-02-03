@@ -22,6 +22,22 @@ import { DateRangeSelect } from '@/components/DateRangeSelect'
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
+function ConfidenceBadge({ sampleSize }: { sampleSize: number }) {
+  const isSignificant = sampleSize >= 30
+  if (isSignificant) {
+    return (
+      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+        n={sampleSize} (reliable)
+      </span>
+    )
+  }
+  return (
+    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
+      n={sampleSize} (low confidence)
+    </span>
+  )
+}
+
 export default function EngagementPage() {
   const [dateRange, setDateRange] = useState('30')
   const [loading, setLoading] = useState(true)
@@ -31,6 +47,7 @@ export default function EngagementPage() {
   const [studioStats, setStudioStats] = useState<any[]>([])
   const [memberGrowth, setMemberGrowth] = useState<any[]>([])
   const [wowMetrics, setWowMetrics] = useState<any>({})
+  const [engagementDist, setEngagementDist] = useState<any>({})
 
   useEffect(() => {
     async function fetchData() {
@@ -38,7 +55,7 @@ export default function EngagementPage() {
       setError(null)
 
       try {
-        const [overviewRes, trendsRes, studioRes, growthRes, wowRes] = await Promise.all([
+        const [overviewRes, trendsRes, studioRes, growthRes, wowRes, distRes] = await Promise.all([
           fetch('/api/supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -64,6 +81,11 @@ export default function EngagementPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ queryType: 'wowMetrics' }),
           }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'engagementDistribution' }),
+          }),
         ])
 
         if (overviewRes.ok) setOverview(await overviewRes.json())
@@ -81,6 +103,9 @@ export default function EngagementPage() {
         }
         if (wowRes.ok) {
           setWowMetrics(await wowRes.json())
+        }
+        if (distRes.ok) {
+          setEngagementDist(await distRes.json())
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data')
@@ -153,17 +178,45 @@ export default function EngagementPage() {
         </div>
       </div>
 
-      {/* North Star Metric */}
+      {/* North Star Metric - Now with Median vs Mean */}
       <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg p-6 text-white mb-6">
-        <p className="text-indigo-100 text-sm font-medium">KEY METRIC</p>
-        <div className="flex items-baseline gap-4 mt-1">
-          <span className="text-4xl font-bold">{engagementRate}</span>
-          <span className="text-indigo-100">Interactions per Post</span>
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-indigo-100 text-sm font-medium">KEY METRIC (USE MEDIAN FOR ACCURACY)</p>
+            <div className="flex items-baseline gap-6 mt-1">
+              <div>
+                <span className="text-4xl font-bold">{engagementDist.medianEngagement || 0}</span>
+                <span className="text-indigo-200 text-sm ml-2">median</span>
+              </div>
+              <div className="text-indigo-200">
+                <span className="text-2xl">{engagementDist.meanEngagement || engagementRate}</span>
+                <span className="text-sm ml-2">mean</span>
+              </div>
+            </div>
+            <p className="text-indigo-200 text-sm mt-2">
+              Interactions per post across {engagementDist.totalPosts || overview.totalPosts || 0} posts
+            </p>
+          </div>
+          <div className="text-right">
+            <ConfidenceBadge sampleSize={engagementDist.totalPosts || 0} />
+            {engagementDist.isSkewed && (
+              <p className="text-xs text-amber-200 mt-2">Distribution is skewed</p>
+            )}
+          </div>
         </div>
-        <p className="text-indigo-200 text-sm mt-2">
-          {totalEngagement.toLocaleString()} total interactions across {overview.totalPosts?.toLocaleString() || 0} posts
-        </p>
       </div>
+
+      {/* Zero Engagement Warning */}
+      {(engagementDist.zeroEngagementRate || 0) > 30 && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-800 font-medium">
+            {engagementDist.zeroEngagementRate}% of posts have zero engagement
+          </p>
+          <p className="text-red-700 text-sm mt-1">
+            {engagementDist.postsZeroEngagement} posts received no likes or comments. Consider investigating content quality or visibility.
+          </p>
+        </div>
+      )}
 
       {/* WoW Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
@@ -323,28 +376,60 @@ export default function EngagementPage() {
         </div>
       </div>
 
+      {/* Engagement Distribution Detail */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Engagement Distribution</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-gray-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500">Posts with 0 engagement</p>
+            <p className="text-2xl font-bold text-red-600">{engagementDist.postsZeroEngagement || 0}</p>
+            <p className="text-xs text-gray-500">{engagementDist.zeroEngagementRate || 0}% of total</p>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500">50th percentile</p>
+            <p className="text-2xl font-bold text-gray-900">{engagementDist.medianEngagement || 0}</p>
+            <p className="text-xs text-gray-500">interactions</p>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500">75th percentile</p>
+            <p className="text-2xl font-bold text-gray-900">{engagementDist.p75Engagement || 0}</p>
+            <p className="text-xs text-gray-500">interactions</p>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500">90th percentile</p>
+            <p className="text-2xl font-bold text-indigo-600">{engagementDist.p90Engagement || 0}</p>
+            <p className="text-xs text-gray-500">top performers</p>
+          </div>
+        </div>
+      </div>
+
       {/* Insights */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <h3 className="font-semibold text-green-800 mb-1">Engagement Health</h3>
-          <p className="text-green-700 text-sm">
-            {parseFloat(engagementRate) >= 2
-              ? `${engagementRate} interactions/post is healthy! Above 2x is good.`
-              : `${engagementRate} interactions/post. Target 2+ for healthy engagement.`}
+        <div className={`rounded-lg p-4 ${(engagementDist.medianEngagement || 0) >= 2 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+          <h3 className={`font-semibold mb-1 ${(engagementDist.medianEngagement || 0) >= 2 ? 'text-green-800' : 'text-amber-800'}`}>Engagement Health</h3>
+          <p className={`text-sm ${(engagementDist.medianEngagement || 0) >= 2 ? 'text-green-700' : 'text-amber-700'}`}>
+            Median {engagementDist.medianEngagement || 0} interactions/post.
+            {(engagementDist.medianEngagement || 0) >= 2
+              ? ' Above benchmark!'
+              : ' Target 2+ median for healthy community.'}
           </p>
         </div>
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <h3 className="font-semibold text-amber-800 mb-1">Weekly Trend</h3>
           <p className="text-amber-700 text-sm">
             {totalChange >= 0
-              ? `Activity up ${totalChangePercent}% week over week. Keep it up!`
+              ? `Activity up ${totalChangePercent}% week over week.`
               : `Activity down ${Math.abs(totalChangePercent)}% week over week. Worth investigating.`}
           </p>
         </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 mb-1">Data Security</h3>
-          <p className="text-blue-700 text-sm">
-            Using secure database functions that only return aggregate counts - no personal data exposed.
+        <div className={`rounded-lg p-4 ${engagementDist.isSkewed ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-200'}`}>
+          <h3 className={`font-semibold mb-1 ${engagementDist.isSkewed ? 'text-amber-800' : 'text-blue-800'}`}>
+            {engagementDist.isSkewed ? 'Distribution Warning' : 'Data Note'}
+          </h3>
+          <p className={`text-sm ${engagementDist.isSkewed ? 'text-amber-700' : 'text-blue-700'}`}>
+            {engagementDist.isSkewed
+              ? `Mean (${engagementDist.meanEngagement}) >> Median (${engagementDist.medianEngagement}). A few viral posts skew the average.`
+              : 'Using secure database functions. No personal data exposed.'}
           </p>
         </div>
       </div>

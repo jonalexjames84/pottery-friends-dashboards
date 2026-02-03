@@ -69,6 +69,30 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ studios: data || [] })
       }
 
+      case 'unifiedActiveMembers': {
+        const { data, error } = await supabase.rpc('get_unified_active_members', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'unifiedFunnel': {
+        const { data, error } = await supabase.rpc('get_unified_funnel')
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'engagementDistribution': {
+        const { data, error } = await supabase.rpc('get_engagement_distribution')
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'resurrectionRate': {
+        const { data, error } = await supabase.rpc('get_resurrection_rate')
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
       default:
         return NextResponse.json({ error: 'Invalid query type' }, { status: 400 })
     }
