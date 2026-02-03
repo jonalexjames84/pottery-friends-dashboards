@@ -14,6 +14,7 @@ import {
   Funnel,
   LabelList,
 } from 'recharts'
+import { EarlyDataBanner, EmptyStateCard } from '@/components/EarlyDataBanner'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#c084fc', '#e879f9', '#f0abfc']
 
@@ -47,12 +48,12 @@ function MetricCard({
   const isNegative = change && change < 0
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-      <p className="text-sm font-medium text-gray-500">{title}</p>
-      <p className="text-xl font-semibold text-gray-900 mt-1">{value}</p>
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
+      <p className="text-xs sm:text-sm font-medium text-gray-500 truncate">{title}</p>
+      <p className="text-lg sm:text-xl font-semibold text-gray-900 mt-1">{value}</p>
       {change !== undefined && (
-        <p className={`text-sm mt-1 ${isPositive ? 'text-green-600' : isNegative ? 'text-red-600' : 'text-gray-500'}`}>
-          {isPositive ? '+' : ''}{change} {changeLabel}
+        <p className={`text-xs sm:text-sm mt-1 ${isPositive ? 'text-green-600' : isNegative ? 'text-red-600' : 'text-gray-500'}`}>
+          {isPositive ? '+' : ''}{change} <span className="hidden sm:inline">{changeLabel}</span>
         </p>
       )}
     </div>
@@ -148,21 +149,24 @@ export default function Home() {
   return (
     <div>
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">Pottery Friends</h1>
-        <p className="text-gray-500 text-sm mb-4">Product Health Dashboard (Unified Metrics)</p>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">Pottery Friends</h1>
+        <p className="text-gray-500 text-xs sm:text-sm mb-3 sm:mb-4">Product Health Dashboard (Unified Metrics)</p>
+
+        {/* Early Data Banner */}
+        <EarlyDataBanner totalUsers={unifiedActive.totalMembers || 0} />
 
         {/* North Star Section */}
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg p-6 text-white mb-4">
-          <div className="flex justify-between items-start">
+        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg p-4 sm:p-6 text-white mb-4">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
             <div>
-              <p className="text-indigo-100 text-sm font-medium">NORTH STAR METRIC</p>
-              <div className="flex items-baseline gap-4 mt-1">
-                <span className="text-4xl font-bold">{unifiedActive.activeMembers || 0}</span>
-                <span className="text-indigo-100">Weekly Active Members</span>
+              <p className="text-indigo-100 text-xs sm:text-sm font-medium">NORTH STAR METRIC</p>
+              <div className="flex items-baseline gap-2 sm:gap-4 mt-1">
+                <span className="text-3xl sm:text-4xl font-bold">{unifiedActive.activeMembers || 0}</span>
+                <span className="text-indigo-100 text-sm sm:text-base">Weekly Active Members</span>
               </div>
-              <p className="text-indigo-200 text-sm mt-2">
-                {unifiedActive.activityRate || 0}% of {unifiedActive.totalMembers || 0} members active (any Supabase action)
+              <p className="text-indigo-200 text-xs sm:text-sm mt-2">
+                {unifiedActive.activityRate || 0}% of {unifiedActive.totalMembers || 0} members active
               </p>
             </div>
             <ConfidenceBadge
@@ -173,31 +177,31 @@ export default function Home() {
         </div>
 
         {/* User Segmentation */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-500">New Users Active</p>
-            <p className="text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.newUserActive || 0}</p>
-            <p className="text-xs text-gray-500 mt-1">Joined last 14 days</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
+            <p className="text-xs sm:text-sm font-medium text-gray-500">New Users</p>
+            <p className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.newUserActive || 0}</p>
+            <p className="text-xs text-gray-500 mt-1 hidden sm:block">Joined last 14 days</p>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-500">Returning Users Active</p>
-            <p className="text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.returningUserActive || 0}</p>
-            <p className="text-xs text-gray-500 mt-1">Joined 14+ days ago</p>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
+            <p className="text-xs sm:text-sm font-medium text-gray-500">Returning</p>
+            <p className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.returningUserActive || 0}</p>
+            <p className="text-xs text-gray-500 mt-1 hidden sm:block">Joined 14+ days ago</p>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-500">Resurrected Users</p>
-            <p className="text-2xl font-semibold text-gray-900 mt-1">{resurrection.resurrectedUsers || 0}</p>
-            <p className="text-xs text-gray-500 mt-1">{resurrection.resurrectionRate || 0}% of churned came back</p>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
+            <p className="text-xs sm:text-sm font-medium text-gray-500">Resurrected</p>
+            <p className="text-xl sm:text-2xl font-semibold text-green-600 mt-1">{resurrection.resurrectedUsers || 0}</p>
+            <p className="text-xs text-gray-500 mt-1 hidden sm:block">{resurrection.resurrectionRate || 0}% came back</p>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-500">Churned Users</p>
-            <p className="text-2xl font-semibold text-gray-900 mt-1">{resurrection.churnedUsers || 0}</p>
-            <p className="text-xs text-gray-500 mt-1">Inactive 14+ days</p>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
+            <p className="text-xs sm:text-sm font-medium text-gray-500">Churned</p>
+            <p className="text-xl sm:text-2xl font-semibold text-red-600 mt-1">{resurrection.churnedUsers || 0}</p>
+            <p className="text-xs text-gray-500 mt-1 hidden sm:block">Inactive 14+ days</p>
           </div>
         </div>
 
         {/* WoW Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4">
           <MetricCard title="Posts" value={thisWeek.posts || 0} change={changes.posts} />
           <MetricCard title="Likes" value={thisWeek.likes || 0} change={changes.likes} />
           <MetricCard title="Comments" value={thisWeek.comments || 0} change={changes.comments} />
@@ -207,16 +211,16 @@ export default function Home() {
       </div>
 
       {/* Unified Funnel + Engagement Distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex justify-between items-start mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="flex justify-between items-start mb-3 sm:mb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Unified User Journey</h2>
-              <p className="text-sm text-gray-500">Acquisition → Activation → Retention</p>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">Unified User Journey</h2>
+              <p className="text-xs sm:text-sm text-gray-500">Acquisition → Retention</p>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-bold text-indigo-600">{unifiedFunnel.activationRate || 0}%</p>
-              <p className="text-xs text-gray-500">Activation Rate</p>
+              <p className="text-xl sm:text-2xl font-bold text-indigo-600">{unifiedFunnel.activationRate || 0}%</p>
+              <p className="text-xs text-gray-500">Activation</p>
             </div>
           </div>
           {funnelData.length > 0 ? (
@@ -252,7 +256,10 @@ export default function Home() {
               </div>
             </>
           ) : (
-            <p className="text-gray-500 text-center py-8">No funnel data</p>
+            <EmptyStateCard
+              title="Funnel data coming soon"
+              description="As users sign up and engage, you'll see the conversion funnel here."
+            />
           )}
         </div>
 
@@ -330,23 +337,26 @@ export default function Home() {
             </BarChart>
           </ResponsiveContainer>
         ) : (
-          <p className="text-gray-500 text-center py-8">No studio data</p>
+          <EmptyStateCard
+            title="Studio data coming soon"
+            description="Create studios and add members to see engagement metrics per studio."
+          />
         )}
       </div>
 
       {/* Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <h3 className="font-semibold text-green-800 mb-1">Activation Insight</h3>
-          <p className="text-green-700 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4">
+          <h3 className="font-semibold text-green-800 text-sm sm:text-base mb-1">Activation Insight</h3>
+          <p className="text-green-700 text-xs sm:text-sm">
             {(unifiedFunnel.activationRate || 0) >= 30
               ? `${unifiedFunnel.activationRate}% activation is healthy for a community app.`
               : `${unifiedFunnel.activationRate || 0}% activation is below 30% benchmark. Focus on first post experience.`}
           </p>
         </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <h3 className="font-semibold text-amber-800 mb-1">Biggest Drop-off</h3>
-          <p className="text-amber-700 text-sm">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 sm:p-4">
+          <h3 className="font-semibold text-amber-800 text-sm sm:text-base mb-1">Biggest Drop-off</h3>
+          <p className="text-amber-700 text-xs sm:text-sm">
             {funnelStages.length > 1 ? (
               (() => {
                 let maxDrop = { from: '', to: '', rate: 0 }
@@ -363,9 +373,9 @@ export default function Home() {
             ) : 'Need more funnel data'}
           </p>
         </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 mb-1">User Health</h3>
-          <p className="text-blue-700 text-sm">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
+          <h3 className="font-semibold text-blue-800 text-sm sm:text-base mb-1">User Health</h3>
+          <p className="text-blue-700 text-xs sm:text-sm">
             {unifiedActive.newUserActive || 0} new + {unifiedActive.returningUserActive || 0} returning active.
             {(resurrection.resurrectionRate || 0) > 10
               ? ` ${resurrection.resurrectionRate}% resurrection rate is promising!`
@@ -375,22 +385,22 @@ export default function Home() {
       </div>
 
       {/* Quick Links */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Link href="/impressions" className="block p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Screen Views</p>
-          <p className="text-sm text-gray-500">PostHog events</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+        <Link href="/impressions" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900 text-sm sm:text-base">Screen Views</p>
+          <p className="text-xs sm:text-sm text-gray-500">PostHog events</p>
         </Link>
-        <Link href="/funnel" className="block p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Login Funnel</p>
-          <p className="text-sm text-gray-500">PostHog events</p>
+        <Link href="/funnel" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900 text-sm sm:text-base">Funnel</p>
+          <p className="text-xs sm:text-sm text-gray-500">User journey</p>
         </Link>
-        <Link href="/retention" className="block p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">DAU Trends</p>
-          <p className="text-sm text-gray-500">PostHog sessions</p>
+        <Link href="/retention" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900 text-sm sm:text-base">Retention</p>
+          <p className="text-xs sm:text-sm text-gray-500">DAU & cohorts</p>
         </Link>
-        <Link href="/engagement" className="block p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Engagement</p>
-          <p className="text-sm text-gray-500">Supabase activity</p>
+        <Link href="/engagement" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900 text-sm sm:text-base">Engagement</p>
+          <p className="text-xs sm:text-sm text-gray-500">Activity stats</p>
         </Link>
       </div>
 

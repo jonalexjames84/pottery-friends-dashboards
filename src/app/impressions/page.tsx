@@ -17,6 +17,7 @@ import {
 } from 'recharts'
 import { MetricCard } from '@/components/MetricCard'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
+import { EarlyDataBanner } from '@/components/EarlyDataBanner'
 
 export default function ImpressionsPage() {
   const [dateRange, setDateRange] = useState('30')
@@ -133,15 +134,17 @@ export default function ImpressionsPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Screen Views</h1>
-          <p className="text-sm text-gray-500">App navigation patterns from PostHog</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Screen Views</h1>
+          <p className="text-xs sm:text-sm text-gray-500">App navigation patterns from PostHog</p>
         </div>
-        <div className="w-40">
+        <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
+
+      <EarlyDataBanner totalUsers={metrics.uniqueUsers} />
 
       {/* North Star for this page */}
       <div className="bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg p-6 text-white mb-6">

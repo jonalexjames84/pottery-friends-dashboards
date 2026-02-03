@@ -19,6 +19,7 @@ import {
   Area,
 } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
+import { EarlyDataBanner } from '@/components/EarlyDataBanner'
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -168,15 +169,17 @@ export default function EngagementPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Community Engagement</h1>
-          <p className="text-sm text-gray-500">Activity metrics from Supabase</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Community Engagement</h1>
+          <p className="text-xs sm:text-sm text-gray-500">Activity metrics from Supabase</p>
         </div>
-        <div className="w-40">
+        <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
+
+      <EarlyDataBanner totalUsers={overview.totalMembers || 0} />
 
       {/* North Star Metric - Now with Median vs Mean */}
       <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg p-6 text-white mb-6">

@@ -14,6 +14,7 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
+import { EarlyDataBanner } from '@/components/EarlyDataBanner'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#c084fc', '#e879f9', '#f0abfc']
 
@@ -133,15 +134,17 @@ export default function FunnelPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">User Funnels</h1>
-          <p className="text-sm text-gray-500">Unified journey from signup to retention</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">User Funnels</h1>
+          <p className="text-xs sm:text-sm text-gray-500">Unified journey from signup to retention</p>
         </div>
-        <div className="w-40">
+        <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
+
+      <EarlyDataBanner totalUsers={unifiedFunnel.totalMembers || 0} />
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">

@@ -15,6 +15,7 @@ import {
   Bar,
 } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
+import { EarlyDataBanner } from '@/components/EarlyDataBanner'
 
 function ConfidenceBadge({ sampleSize, label }: { sampleSize: number; label?: string }) {
   const isSignificant = sampleSize >= 30
@@ -193,15 +194,17 @@ export default function RetentionPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Retention & Activity</h1>
-          <p className="text-sm text-gray-500">User engagement patterns from PostHog + Supabase</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Retention & Activity</h1>
+          <p className="text-xs sm:text-sm text-gray-500">User engagement patterns from PostHog + Supabase</p>
         </div>
-        <div className="w-40">
+        <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
+
+      <EarlyDataBanner totalUsers={unifiedActive.totalMembers || metrics.totalUsers} />
 
       {/* North Star Metric */}
       <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg p-6 text-white mb-6">
