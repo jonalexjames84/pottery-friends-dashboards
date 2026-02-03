@@ -14,7 +14,7 @@ import {
   Funnel,
   LabelList,
 } from 'recharts'
-import { EarlyDataBanner, EmptyStateCard } from '@/components/EarlyDataBanner'
+import { EarlyDataBanner, EmptyStateCard, DirectionalFlag } from '@/components/EarlyDataBanner'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#c084fc', '#e879f9', '#f0abfc']
 
@@ -162,17 +162,21 @@ export default function Home() {
             <div>
               <p className="text-indigo-100 text-xs sm:text-sm font-medium">NORTH STAR METRIC</p>
               <div className="flex items-baseline gap-2 sm:gap-4 mt-1">
-                <span className="text-3xl sm:text-4xl font-bold">{unifiedActive.activeMembers || 0}</span>
+                <span className="text-3xl sm:text-4xl font-bold">
+                  {unifiedActive.activeMembers || 0}
+                  {(unifiedActive.totalMembers || 0) < 100 && <span className="text-amber-300">*</span>}
+                </span>
                 <span className="text-indigo-100 text-sm sm:text-base">Weekly Active Members</span>
               </div>
               <p className="text-indigo-200 text-xs sm:text-sm mt-2">
                 {unifiedActive.activityRate || 0}% of {unifiedActive.totalMembers || 0} members active
               </p>
             </div>
-            <ConfidenceBadge
-              isSignificant={unifiedActive.isStatisticallySignificant}
-              sampleSize={unifiedActive.sampleSize || 0}
-            />
+            {(unifiedActive.totalMembers || 0) < 100 && (
+              <span className="text-xs bg-amber-400/20 text-amber-200 px-2 py-0.5 rounded">
+                *Directional
+              </span>
+            )}
           </div>
         </div>
 
@@ -219,7 +223,10 @@ export default function Home() {
               <p className="text-xs sm:text-sm text-gray-500">Acquisition → Retention</p>
             </div>
             <div className="text-right">
-              <p className="text-xl sm:text-2xl font-bold text-indigo-600">{unifiedFunnel.activationRate || 0}%</p>
+              <p className="text-xl sm:text-2xl font-bold text-indigo-600">
+                {unifiedFunnel.activationRate || 0}%
+                {(unifiedFunnel.totalMembers || 0) < 100 && <span className="text-amber-500">*</span>}
+              </p>
               <p className="text-xs text-gray-500">Activation</p>
             </div>
           </div>
