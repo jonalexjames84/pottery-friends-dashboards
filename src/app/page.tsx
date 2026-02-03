@@ -29,7 +29,7 @@ export default function Home() {
           setPosthogStats({ screenViews, uniqueUsers, logins })
         }
 
-        // Fetch Supabase data
+        // Fetch Supabase data (using secure aggregate functions)
         const sbRes = await fetch('/api/supabase', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -68,9 +68,9 @@ export default function Home() {
             <MetricCard title="Screen Views" value={posthogStats.screenViews || 0} />
             <MetricCard title="Active Users" value={posthogStats.uniqueUsers || 0} />
             <MetricCard title="Logins" value={posthogStats.logins || 0} />
-            <MetricCard title="Total Members" value={supabaseStats.totalMembers || 0} />
+            <MetricCard title="Members" value={supabaseStats.totalMembers || 0} />
             <MetricCard title="Posts" value={supabaseStats.totalPosts || 0} />
-            <MetricCard title="Likes" value={supabaseStats.totalLikes || 0} />
+            <MetricCard title="Engagement" value={(supabaseStats.totalLikes || 0) + (supabaseStats.totalComments || 0) + (supabaseStats.totalFollows || 0)} />
           </div>
         )}
       </div>
