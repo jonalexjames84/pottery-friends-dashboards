@@ -10,6 +10,7 @@ const navLinks = [
   { href: '/funnel', label: 'Funnel' },
   { href: '/retention', label: 'Retention' },
   { href: '/engagement', label: 'Engagement' },
+  { href: '/website', label: 'Website' },
 ]
 
 export function Navigation() {

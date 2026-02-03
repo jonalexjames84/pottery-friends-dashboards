@@ -104,11 +104,16 @@ export default function Home() {
   const activationRate = unifiedFunnel.activationRate || 0
   const churnedUsers = resurrection.churnedUsers || 0
 
-  // User health breakdown for pie chart
+  // User health breakdown for pie chart (matches the stats grid)
+  const newAndActive = unifiedActive.newUserActive || 0
+  const returning = unifiedActive.returningUserActive || 0
+  const inactive = Math.max(0, totalMembers - newAndActive - returning - churnedUsers)
+
   const userHealthData = [
-    { name: 'Active', value: activeMembers, color: '#10b981' },
+    { name: 'New & Active', value: newAndActive, color: '#10b981' },
+    { name: 'Returning', value: returning, color: '#3b82f6' },
     { name: 'Churned', value: churnedUsers, color: '#ef4444' },
-    { name: 'New (not yet active)', value: Math.max(0, totalMembers - activeMembers - churnedUsers), color: '#f59e0b' },
+    { name: 'Inactive', value: inactive, color: '#f59e0b' },
   ].filter(d => d.value > 0)
 
   // Determine overall health status
