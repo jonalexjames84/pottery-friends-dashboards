@@ -10,61 +10,20 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  FunnelChart,
-  Funnel,
-  LabelList,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
 } from 'recharts'
-import { EarlyDataBanner, EmptyStateCard, DirectionalFlag } from '@/components/EarlyDataBanner'
 
-const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#c084fc', '#e879f9', '#f0abfc']
-
-function ConfidenceBadge({ isSignificant, sampleSize }: { isSignificant: boolean; sampleSize: number }) {
-  if (isSignificant) {
-    return (
-      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-        n={sampleSize} (reliable)
-      </span>
-    )
-  }
-  return (
-    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
-      n={sampleSize} (low confidence)
-    </span>
-  )
-}
-
-function MetricCard({
-  title,
-  value,
-  change,
-  changeLabel = 'vs last week',
-}: {
-  title: string
-  value: string | number
-  change?: number
-  changeLabel?: string
-}) {
-  const isPositive = change && change > 0
-  const isNegative = change && change < 0
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
-      <p className="text-xs sm:text-sm font-medium text-gray-500 truncate">{title}</p>
-      <p className="text-lg sm:text-xl font-semibold text-gray-900 mt-1">{value}</p>
-      {change !== undefined && (
-        <p className={`text-xs sm:text-sm mt-1 ${isPositive ? 'text-green-600' : isNegative ? 'text-red-600' : 'text-gray-500'}`}>
-          {isPositive ? '+' : ''}{change} <span className="hidden sm:inline">{changeLabel}</span>
-        </p>
-      )}
-    </div>
-  )
-}
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444']
 
 export default function Home() {
   const [loading, setLoading] = useState(true)
+  const [overview, setOverview] = useState<any>({})
   const [unifiedActive, setUnifiedActive] = useState<any>({})
   const [unifiedFunnel, setUnifiedFunnel] = useState<any>({})
-  const [engagementDist, setEngagementDist] = useState<any>({})
   const [resurrection, setResurrection] = useState<any>({})
   const [wowMetrics, setWowMetrics] = useState<any>({})
   const [studioHealth, setStudioHealth] = useState<any[]>([])
@@ -74,7 +33,12 @@ export default function Home() {
       setLoading(true)
 
       try {
-        const [activeRes, funnelRes, distRes, resRes, wowRes, healthRes] = await Promise.all([
+        const [overviewRes, activeRes, funnelRes, resRes, wowRes, healthRes] = await Promise.all([
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'overview' }),
+          }),
           fetch('/api/supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -84,11 +48,6 @@ export default function Home() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ queryType: 'unifiedFunnel' }),
-          }),
-          fetch('/api/supabase', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queryType: 'engagementDistribution' }),
           }),
           fetch('/api/supabase', {
             method: 'POST',
@@ -107,14 +66,14 @@ export default function Home() {
           }),
         ])
 
+        if (overviewRes.ok) setOverview(await overviewRes.json())
         if (activeRes.ok) setUnifiedActive(await activeRes.json())
         if (funnelRes.ok) setUnifiedFunnel(await funnelRes.json())
-        if (distRes.ok) setEngagementDist(await distRes.json())
         if (resRes.ok) setResurrection(await resRes.json())
         if (wowRes.ok) setWowMetrics(await wowRes.json())
         if (healthRes.ok) {
           const healthData = await healthRes.json()
-          setStudioHealth(healthData.studios || [])
+          setStudioHealth(Array.isArray(healthData) ? healthData : healthData.studios || [])
         }
       } catch (err) {
         console.error('Failed to fetch:', err)
@@ -138,283 +97,337 @@ export default function Home() {
   const thisWeek = wowMetrics.thisWeek || {}
   const funnelStages = unifiedFunnel.stages || []
 
-  // Format funnel data for chart
-  const funnelData = funnelStages.map((stage: any, index: number) => ({
-    name: stage.name,
-    value: stage.count,
-    rate: stage.rate,
-    fill: COLORS[index % COLORS.length],
-  }))
+  // Calculate key metrics
+  const totalMembers = unifiedActive.totalMembers || overview.totalMembers || 0
+  const activeMembers = unifiedActive.activeMembers || 0
+  const activityRate = unifiedActive.activityRate || 0
+  const activationRate = unifiedFunnel.activationRate || 0
+  const churnedUsers = resurrection.churnedUsers || 0
+
+  // User health breakdown for pie chart
+  const userHealthData = [
+    { name: 'Active', value: activeMembers, color: '#10b981' },
+    { name: 'Churned', value: churnedUsers, color: '#ef4444' },
+    { name: 'New (not yet active)', value: Math.max(0, totalMembers - activeMembers - churnedUsers), color: '#f59e0b' },
+  ].filter(d => d.value > 0)
+
+  // Determine overall health status
+  const healthStatus = activityRate >= 40 ? 'healthy' : activityRate >= 20 ? 'okay' : 'needs-attention'
+  const healthColors = {
+    'healthy': 'from-emerald-500 to-teal-600',
+    'okay': 'from-amber-500 to-orange-600',
+    'needs-attention': 'from-red-500 to-rose-600'
+  }
 
   return (
-    <div>
+    <div className="space-y-6">
       {/* Header */}
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">Pottery Friends</h1>
-        <p className="text-gray-500 text-xs sm:text-sm mb-3 sm:mb-4">Product Health Dashboard (Unified Metrics)</p>
-
-        {/* Early Data Banner */}
-        <EarlyDataBanner totalUsers={unifiedActive.totalMembers || 0} />
-
-        {/* North Star Section */}
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg p-4 sm:p-6 text-white mb-4">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
-            <div>
-              <p className="text-indigo-100 text-xs sm:text-sm font-medium">NORTH STAR METRIC</p>
-              <div className="flex items-baseline gap-2 sm:gap-4 mt-1">
-                <span className="text-3xl sm:text-4xl font-bold">
-                  {unifiedActive.activeMembers || 0}
-                  {(unifiedActive.totalMembers || 0) < 100 && <span className="text-amber-300">*</span>}
-                </span>
-                <span className="text-indigo-100 text-sm sm:text-base">Weekly Active Members</span>
-              </div>
-              <p className="text-indigo-200 text-xs sm:text-sm mt-2">
-                {unifiedActive.activityRate || 0}% of {unifiedActive.totalMembers || 0} members active
-              </p>
-            </div>
-            {(unifiedActive.totalMembers || 0) < 100 && (
-              <span className="text-xs bg-amber-400/20 text-amber-200 px-2 py-0.5 rounded">
-                *Directional
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* User Segmentation */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-6">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
-            <p className="text-xs sm:text-sm font-medium text-gray-500">New Users</p>
-            <p className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.newUserActive || 0}</p>
-            <p className="text-xs text-gray-500 mt-1 hidden sm:block">Joined last 14 days</p>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
-            <p className="text-xs sm:text-sm font-medium text-gray-500">Returning</p>
-            <p className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.returningUserActive || 0}</p>
-            <p className="text-xs text-gray-500 mt-1 hidden sm:block">Joined 14+ days ago</p>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
-            <p className="text-xs sm:text-sm font-medium text-gray-500">Resurrected</p>
-            <p className="text-xl sm:text-2xl font-semibold text-green-600 mt-1">{resurrection.resurrectedUsers || 0}</p>
-            <p className="text-xs text-gray-500 mt-1 hidden sm:block">{resurrection.resurrectionRate || 0}% came back</p>
-          </div>
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4">
-            <p className="text-xs sm:text-sm font-medium text-gray-500">Churned</p>
-            <p className="text-xl sm:text-2xl font-semibold text-red-600 mt-1">{resurrection.churnedUsers || 0}</p>
-            <p className="text-xs text-gray-500 mt-1 hidden sm:block">Inactive 14+ days</p>
-          </div>
-        </div>
-
-        {/* WoW Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4">
-          <MetricCard title="Posts" value={thisWeek.posts || 0} change={changes.posts} />
-          <MetricCard title="Likes" value={thisWeek.likes || 0} change={changes.likes} />
-          <MetricCard title="Comments" value={thisWeek.comments || 0} change={changes.comments} />
-          <MetricCard title="Follows" value={thisWeek.follows || 0} change={changes.follows} />
-          <MetricCard title="New Members" value={thisWeek.new_members || 0} change={changes.newMembers} />
-        </div>
-      </div>
-
-      {/* Unified Funnel + Engagement Distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-          <div className="flex justify-between items-start mb-3 sm:mb-4">
-            <div>
-              <h2 className="text-base sm:text-lg font-semibold text-gray-900">Unified User Journey</h2>
-              <p className="text-xs sm:text-sm text-gray-500">Acquisition → Retention</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xl sm:text-2xl font-bold text-indigo-600">
-                {unifiedFunnel.activationRate || 0}%
-                {(unifiedFunnel.totalMembers || 0) < 100 && <span className="text-amber-500">*</span>}
-              </p>
-              <p className="text-xs text-gray-500">Activation</p>
-            </div>
-          </div>
-          {funnelData.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={220}>
-                <FunnelChart>
-                  <Tooltip
-                    formatter={(value: number, name: string, props: any) => [
-                      `${value} users (${props.payload.rate}%)`,
-                      props.payload.name
-                    ]}
-                  />
-                  <Funnel dataKey="value" data={funnelData} isAnimationActive>
-                    <LabelList position="right" fill="#374151" stroke="none" dataKey="name" fontSize={11} />
-                    <LabelList position="center" fill="#fff" stroke="none" dataKey="value" fontSize={12} fontWeight="bold" />
-                  </Funnel>
-                </FunnelChart>
-              </ResponsiveContainer>
-              <div className="mt-4 space-y-1">
-                {funnelStages.slice(0, -1).map((stage: any, i: number) => {
-                  const next = funnelStages[i + 1]
-                  const dropoff = stage.count - next.count
-                  const dropoffRate = stage.count > 0 ? Math.round((dropoff / stage.count) * 100) : 0
-                  return (
-                    <div key={i} className="flex justify-between text-sm">
-                      <span className="text-gray-600">{stage.name} → {next.name}</span>
-                      <span className={dropoffRate > 50 ? 'text-red-600 font-medium' : 'text-amber-600'}>
-                        -{dropoff} ({dropoffRate}% drop)
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          ) : (
-            <EmptyStateCard
-              title="Funnel data coming soon"
-              description="As users sign up and engage, you'll see the conversion funnel here."
-            />
-          )}
-        </div>
-
-        {/* Engagement Distribution */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">Engagement Distribution</h2>
-              <p className="text-sm text-gray-500">Per-post engagement stats</p>
-            </div>
-            {engagementDist.isSkewed && (
-              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
-                Skewed distribution
-              </span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="text-sm text-gray-500">Median</p>
-              <p className="text-3xl font-bold text-gray-900">{engagementDist.medianEngagement || 0}</p>
-              <p className="text-xs text-gray-500">interactions/post</p>
-            </div>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="text-sm text-gray-500">Mean</p>
-              <p className="text-3xl font-bold text-gray-900">{engagementDist.meanEngagement || 0}</p>
-              <p className="text-xs text-gray-500">interactions/post</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Posts with 0 engagement</span>
-              <span className="text-sm font-medium text-red-600">
-                {engagementDist.postsZeroEngagement || 0} ({engagementDist.zeroEngagementRate || 0}%)
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">75th percentile</span>
-              <span className="text-sm font-medium text-gray-900">{engagementDist.p75Engagement || 0} interactions</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">90th percentile</span>
-              <span className="text-sm font-medium text-gray-900">{engagementDist.p90Engagement || 0} interactions</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Total posts analyzed</span>
-              <span className="text-sm font-medium text-gray-900">{engagementDist.totalPosts || 0}</span>
-            </div>
-          </div>
-
-          {engagementDist.isSkewed && (
-            <div className="mt-4 p-3 bg-amber-50 rounded-lg">
-              <p className="text-xs text-amber-800">
-                <strong>Note:</strong> Mean ({engagementDist.meanEngagement}) is much higher than median ({engagementDist.medianEngagement}).
-                A few viral posts are skewing the average. Use median for a more representative view.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Studio Health */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Studio Health</h2>
-        <p className="text-sm text-gray-500 mb-4">Engagement per member by studio</p>
-        {studioHealth && studioHealth.length > 0 ? (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={studioHealth} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" tick={{ fontSize: 12 }} />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={100} />
-              <Tooltip />
-              <Bar dataKey="engagementPerMember" fill="#6366f1" name="Engagement/Member" />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyStateCard
-            title="Studio data coming soon"
-            description="Create studios and add members to see engagement metrics per studio."
-          />
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Pottery Friends Beta</h1>
+        <p className="text-gray-500 text-sm">Weekly Product Review — {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+        {totalMembers < 100 && (
+          <p className="text-xs text-amber-600 mt-1">* Beta data ({totalMembers} users) — directional metrics</p>
         )}
       </div>
 
-      {/* Insights */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4">
-          <h3 className="font-semibold text-green-800 text-sm sm:text-base mb-1">Activation Insight</h3>
-          <p className="text-green-700 text-xs sm:text-sm">
-            {(unifiedFunnel.activationRate || 0) >= 30
-              ? `${unifiedFunnel.activationRate}% activation is healthy for a community app.`
-              : `${unifiedFunnel.activationRate || 0}% activation is below 30% benchmark. Focus on first post experience.`}
-          </p>
-        </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 sm:p-4">
-          <h3 className="font-semibold text-amber-800 text-sm sm:text-base mb-1">Biggest Drop-off</h3>
-          <p className="text-amber-700 text-xs sm:text-sm">
-            {funnelStages.length > 1 ? (
-              (() => {
-                let maxDrop = { from: '', to: '', rate: 0 }
-                for (let i = 0; i < funnelStages.length - 1; i++) {
-                  const dropRate = funnelStages[i].count > 0
-                    ? ((funnelStages[i].count - funnelStages[i+1].count) / funnelStages[i].count) * 100
-                    : 0
-                  if (dropRate > maxDrop.rate) {
-                    maxDrop = { from: funnelStages[i].name, to: funnelStages[i+1].name, rate: Math.round(dropRate) }
-                  }
-                }
-                return `${maxDrop.from} → ${maxDrop.to} loses ${maxDrop.rate}% of users.`
-              })()
-            ) : 'Need more funnel data'}
-          </p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
-          <h3 className="font-semibold text-blue-800 text-sm sm:text-base mb-1">User Health</h3>
-          <p className="text-blue-700 text-xs sm:text-sm">
-            {unifiedActive.newUserActive || 0} new + {unifiedActive.returningUserActive || 0} returning active.
-            {(resurrection.resurrectionRate || 0) > 10
-              ? ` ${resurrection.resurrectionRate}% resurrection rate is promising!`
-              : ' Focus on re-engaging churned users.'}
-          </p>
+      {/* North Star: Weekly Active Members */}
+      <div className={`bg-gradient-to-r ${healthColors[healthStatus]} rounded-xl p-6 text-white`}>
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+          <div>
+            <p className="text-white/80 text-sm font-medium uppercase tracking-wide">North Star Metric</p>
+            <div className="flex items-baseline gap-3 mt-2">
+              <span className="text-5xl font-bold">{activeMembers}</span>
+              <span className="text-white/90 text-lg">Weekly Active Members</span>
+            </div>
+            <p className="text-white/70 text-sm mt-2">
+              {activityRate}% of {totalMembers} total members active this week
+            </p>
+          </div>
+          <div className="text-right">
+            <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+              healthStatus === 'healthy' ? 'bg-white/20' :
+              healthStatus === 'okay' ? 'bg-white/20' : 'bg-white/30'
+            }`}>
+              {healthStatus === 'healthy' ? '✓ Healthy' :
+               healthStatus === 'okay' ? '→ Building' : '! Focus needed'}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Quick Links */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
-        <Link href="/impressions" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900 text-sm sm:text-base">Screen Views</p>
-          <p className="text-xs sm:text-sm text-gray-500">PostHog events</p>
+      {/* This Week's Numbers */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">This Week vs Last Week</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+          {[
+            { label: 'New Members', value: thisWeek.new_members || 0, change: changes.newMembers },
+            { label: 'Posts', value: thisWeek.posts || 0, change: changes.posts },
+            { label: 'Likes', value: thisWeek.likes || 0, change: changes.likes },
+            { label: 'Comments', value: thisWeek.comments || 0, change: changes.comments },
+            { label: 'Follows', value: thisWeek.follows || 0, change: changes.follows },
+          ].map((metric) => (
+            <div key={metric.label} className="text-center">
+              <p className="text-2xl font-bold text-gray-900">{metric.value}</p>
+              <p className="text-sm text-gray-500">{metric.label}</p>
+              {metric.change !== undefined && (
+                <p className={`text-xs mt-1 ${metric.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {metric.change >= 0 ? '+' : ''}{metric.change}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Two Column: Funnel + User Health */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Activation Funnel */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Activation Funnel</h2>
+              <p className="text-sm text-gray-500">New user journey (last 30 days)</p>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-indigo-600">{activationRate}%</p>
+              <p className="text-xs text-gray-500">reach "Engaged"</p>
+            </div>
+          </div>
+
+          {funnelStages.length > 0 ? (
+            <div className="space-y-3">
+              {funnelStages.map((stage: any, i: number) => {
+                const width = stage.rate || 0
+                const isDropoff = i > 0 && funnelStages[i-1].count - stage.count > funnelStages[i-1].count * 0.4
+                return (
+                  <div key={i}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className={`font-medium ${isDropoff ? 'text-red-600' : 'text-gray-700'}`}>
+                        {stage.name}
+                      </span>
+                      <span className="text-gray-500">{stage.count} ({stage.rate}%)</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-3">
+                      <div
+                        className={`h-3 rounded-full ${isDropoff ? 'bg-red-400' : 'bg-indigo-500'}`}
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-gray-400 text-center py-8">Waiting for signups...</p>
+          )}
+        </div>
+
+        {/* User Health */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">User Health</h2>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-green-600">{unifiedActive.newUserActive || 0}</p>
+              <p className="text-xs text-gray-500">New & Active</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-blue-600">{unifiedActive.returningUserActive || 0}</p>
+              <p className="text-xs text-gray-500">Returning</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-red-600">{churnedUsers}</p>
+              <p className="text-xs text-gray-500">Churned (14d+)</p>
+            </div>
+          </div>
+
+          {userHealthData.length > 0 && (
+            <ResponsiveContainer width="100%" height={160}>
+              <PieChart>
+                <Pie
+                  data={userHealthData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={40}
+                  outerRadius={70}
+                  dataKey="value"
+                  label={({ name, value }) => `${name}: ${value}`}
+                  labelLine={false}
+                >
+                  {userHealthData.map((entry, index) => (
+                    <Cell key={index} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Studio Performance */}
+      {studioHealth && studioHealth.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Studio Performance</h2>
+          <p className="text-sm text-gray-500 mb-4">Engagement per member by studio</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={studioHealth.slice(0, 5)} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" tick={{ fontSize: 12 }} />
+              <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={120} />
+              <Tooltip />
+              <Bar dataKey="engagementPerMember" fill="#6366f1" name="Engagement/Member" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* All-Time Totals */}
+      <div className="bg-gray-50 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">All-Time Totals</h2>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 text-center">
+          {[
+            { label: 'Members', value: overview.totalMembers || 0 },
+            { label: 'Studios', value: overview.totalStudios || 0 },
+            { label: 'Posts', value: overview.totalPosts || 0 },
+            { label: 'Likes', value: overview.totalLikes || 0 },
+            { label: 'Comments', value: overview.totalComments || 0 },
+            { label: 'Follows', value: overview.totalFollows || 0 },
+          ].map((stat) => (
+            <div key={stat.label}>
+              <p className="text-xl font-bold text-gray-900">{stat.value.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Questions & Hypotheses Section */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">📊 Questions to Answer This Week</h2>
+
+        <div className="space-y-4">
+          <div className="border-l-4 border-indigo-500 pl-4">
+            <p className="font-medium text-gray-900">Are new users finding value quickly?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> {activationRate}% of new signups reach "Engaged" status.
+              {activationRate >= 50
+                ? " → Strong! Users are finding their aha moment."
+                : activationRate >= 30
+                  ? " → Okay, but room to improve onboarding."
+                  : " → Low. Consider guided first-post experience or better onboarding."}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-emerald-500 pl-4">
+            <p className="font-medium text-gray-900">Is the community sticky?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> {activityRate}% weekly active rate, {churnedUsers} churned users.
+              {activityRate >= 40
+                ? " → Great retention! Community is engaging."
+                : activityRate >= 20
+                  ? " → Building. Focus on reasons to return (notifications, new content)."
+                  : " → Need habit-forming features. Consider push notifications or digest emails."}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-amber-500 pl-4">
+            <p className="font-medium text-gray-900">Are studios driving engagement?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> {overview.totalStudios || 0} studios with varying engagement levels.
+              {studioHealth.length > 0 && studioHealth[0].engagementPerMember > 10
+                ? ` → "${studioHealth[0].name}" is leading. Learn what they're doing right.`
+                : " → Studios need more activation. Consider studio leaderboards or challenges."}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Beta Hypotheses */}
+      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-6 border border-purple-100">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">🧪 Beta Hypotheses to Validate</h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${activationRate >= 40 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H1: First post = retention driver</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              If users post within 48hrs, they're more likely to return.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Status: {funnelStages[2]?.count || 0} of {funnelStages[0]?.count || 0} made first post
+              ({funnelStages[2]?.rate || 0}%)
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${(overview.totalFollows || 0) > totalMembers * 2 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H2: Social connections = stickiness</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Users with 3+ follows have higher retention.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Status: {overview.totalFollows || 0} total follows across {totalMembers} members
+              (avg {totalMembers > 0 ? ((overview.totalFollows || 0) / totalMembers).toFixed(1) : 0}/user)
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${studioHealth.some(s => s.memberCount >= 5) ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H3: Studios create belonging</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Studio members engage more than non-studio members.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Status: {overview.totalStudios || 0} studios, largest has{' '}
+              {studioHealth.length > 0 ? studioHealth[0].memberCount || 0 : 0} members
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${(overview.totalLikes || 0) > (overview.totalPosts || 1) * 3 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H4: Engagement begets engagement</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Posts that get likes get more comments.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Status: {overview.totalLikes || 0} likes, {overview.totalComments || 0} comments on{' '}
+              {overview.totalPosts || 0} posts
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Link href="/funnel" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900">Funnel Deep Dive</p>
+          <p className="text-xs text-gray-500">Conversion analysis</p>
         </Link>
-        <Link href="/funnel" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900 text-sm sm:text-base">Funnel</p>
-          <p className="text-xs sm:text-sm text-gray-500">User journey</p>
+        <Link href="/retention" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900">Retention</p>
+          <p className="text-xs text-gray-500">Cohort analysis</p>
         </Link>
-        <Link href="/retention" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900 text-sm sm:text-base">Retention</p>
-          <p className="text-xs sm:text-sm text-gray-500">DAU & cohorts</p>
+        <Link href="/engagement" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900">Engagement</p>
+          <p className="text-xs text-gray-500">Activity metrics</p>
         </Link>
-        <Link href="/engagement" className="block p-3 sm:p-4 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900 text-sm sm:text-base">Engagement</p>
-          <p className="text-xs sm:text-sm text-gray-500">Activity stats</p>
+        <Link href="/impressions" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <p className="font-medium text-gray-900">Screen Views</p>
+          <p className="text-xs text-gray-500">PostHog data</p>
         </Link>
       </div>
 
-      {/* Data Sources */}
-      <div className="mt-6 text-xs text-gray-400 text-center">
-        Unified metrics from Supabase (posts, likes, comments, follows). PostHog data on detail pages.
-      </div>
+      <p className="text-xs text-gray-400 text-center">
+        Data from Supabase (actions) + PostHog (sessions). Updated in real-time.
+      </p>
     </div>
   )
 }

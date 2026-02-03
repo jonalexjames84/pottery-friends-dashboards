@@ -2,132 +2,65 @@
 
 import { useState, useEffect } from 'react'
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  AreaChart,
-  Area,
   BarChart,
   Bar,
 } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
-import { EarlyDataBanner } from '@/components/EarlyDataBanner'
-
-function ConfidenceBadge({ sampleSize, label }: { sampleSize: number; label?: string }) {
-  const isSignificant = sampleSize >= 30
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded ${isSignificant ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-      n={sampleSize} {label || (isSignificant ? '(reliable)' : '(low confidence)')}
-    </span>
-  )
-}
 
 export default function RetentionPage() {
   const [dateRange, setDateRange] = useState('30')
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [dailyActiveUsers, setDailyActiveUsers] = useState<any[]>([])
   const [cohorts, setCohorts] = useState<any[]>([])
   const [unifiedActive, setUnifiedActive] = useState<any>({})
   const [resurrection, setResurrection] = useState<any>({})
-  const [metrics, setMetrics] = useState({
-    totalUsers: 0,
-    sessionsToday: 0,
-    avgDAU: 0,
-    stickiness: 0,
-    thisWeekDAU: 0,
-    lastWeekDAU: 0,
-    peakDAU: 0,
-    peakDate: '',
-  })
+  const [retentionCohorts, setRetentionCohorts] = useState<any>({})
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true)
-      setError(null)
 
       try {
-        // Fetch PostHog events
+        // Fetch PostHog events for DAU
         const eventsRes = await fetch('/api/posthog', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ queryType: 'events', days: parseInt(dateRange) }),
         })
 
-        if (!eventsRes.ok) throw new Error('Failed to fetch events')
-        const eventsData = await eventsRes.json()
-        const events = eventsData.results || []
+        if (eventsRes.ok) {
+          const eventsData = await eventsRes.json()
+          const events = eventsData.results || []
 
-        // Get all users
-        const allUsers = new Set(events.map((e: any) => e.distinct_id))
-        const totalUsers = allUsers.size
-
-        // Group by date for daily active users
-        const dateUserMap = new Map<string, Set<string>>()
-        events.forEach((e: any) => {
-          const date = e.timestamp.split('T')[0]
-          if (!dateUserMap.has(date)) {
-            dateUserMap.set(date, new Set())
-          }
-          dateUserMap.get(date)!.add(e.distinct_id)
-        })
-
-        const dauData = Array.from(dateUserMap.entries())
-          .map(([date, users]) => ({
-            date,
-            dau: users.size,
-          }))
-          .sort((a, b) => a.date.localeCompare(b.date))
-
-        setDailyActiveUsers(dauData)
-
-        // Calculate metrics
-        const today = new Date().toISOString().split('T')[0]
-        const todayUsers = dateUserMap.get(today)
-        const sessionsToday = todayUsers ? todayUsers.size : 0
-
-        const avgDAU = dauData.length > 0
-          ? Math.round(dauData.reduce((sum, d) => sum + d.dau, 0) / dauData.length)
-          : 0
-
-        const stickiness = totalUsers > 0 ? Math.round((avgDAU / totalUsers) * 100) : 0
-
-        // WoW calculations
-        const now = new Date()
-        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
-
-        const thisWeekDAU = dauData
-          .filter(d => new Date(d.date) >= oneWeekAgo)
-          .reduce((sum, d) => sum + d.dau, 0)
-
-        const lastWeekDAU = dauData
-          .filter(d => {
-            const date = new Date(d.date)
-            return date >= twoWeeksAgo && date < oneWeekAgo
+          // Group by date for daily active users
+          const dateUserMap = new Map<string, Set<string>>()
+          events.forEach((e: any) => {
+            const date = e.timestamp.split('T')[0]
+            if (!dateUserMap.has(date)) {
+              dateUserMap.set(date, new Set())
+            }
+            dateUserMap.get(date)!.add(e.distinct_id)
           })
-          .reduce((sum, d) => sum + d.dau, 0)
 
-        // Peak DAU
-        const peakDay = dauData.reduce((max, d) => d.dau > max.dau ? d : max, { dau: 0, date: '' })
+          const dauData = Array.from(dateUserMap.entries())
+            .map(([date, users]) => ({
+              date,
+              dau: users.size,
+            }))
+            .sort((a, b) => a.date.localeCompare(b.date))
 
-        setMetrics({
-          totalUsers,
-          sessionsToday,
-          avgDAU,
-          stickiness,
-          thisWeekDAU,
-          lastWeekDAU,
-          peakDAU: peakDay.dau,
-          peakDate: peakDay.date,
-        })
+          setDailyActiveUsers(dauData)
+        }
 
-        // Fetch Supabase data in parallel
-        const [cohortRes, unifiedRes, resRes] = await Promise.all([
+        // Fetch Supabase data
+        const [cohortRes, unifiedRes, resRes, retCohortRes] = await Promise.all([
           fetch('/api/supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -143,20 +76,22 @@ export default function RetentionPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ queryType: 'resurrectionRate' }),
           }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'retentionCohorts', days: 60 }),
+          }),
         ])
 
         if (cohortRes.ok) {
           const cohortData = await cohortRes.json()
           setCohorts(cohortData.cohorts || [])
         }
-        if (unifiedRes.ok) {
-          setUnifiedActive(await unifiedRes.json())
-        }
-        if (resRes.ok) {
-          setResurrection(await resRes.json())
-        }
+        if (unifiedRes.ok) setUnifiedActive(await unifiedRes.json())
+        if (resRes.ok) setResurrection(await resRes.json())
+        if (retCohortRes.ok) setRetentionCohorts(await retCohortRes.json())
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data')
+        console.error('Failed to load data:', err)
       } finally {
         setLoading(false)
       }
@@ -173,252 +108,219 @@ export default function RetentionPage() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">Error: {error}</p>
-        <p className="text-red-600 text-sm mt-2">Make sure POSTHOG_API_KEY is set in environment variables.</p>
-      </div>
-    )
-  }
+  const totalMembers = unifiedActive.totalMembers || 0
+  const activeMembers = unifiedActive.activeMembers || 0
+  const activityRate = unifiedActive.activityRate || 0
+  const churnedUsers = resurrection.churnedUsers || 0
+  const resurrectedUsers = resurrection.resurrectedUsers || 0
+  const resurrectionRate = resurrection.resurrectionRate || 0
 
-  const wowChange = metrics.thisWeekDAU - metrics.lastWeekDAU
-  const wowPercent = metrics.lastWeekDAU > 0
-    ? Math.round((wowChange / metrics.lastWeekDAU) * 100)
+  // Calculate retention health
+  const retentionHealth = activityRate >= 40 ? 'healthy' : activityRate >= 20 ? 'okay' : 'needs-attention'
+
+  // Get cohort retention data
+  const cohortData = retentionCohorts.cohorts || []
+
+  // Calculate average D1 and D7 retention
+  const avgD1 = cohortData.length > 0
+    ? Math.round(cohortData.reduce((sum: number, c: any) => sum + (c.d1_rate || 0), 0) / cohortData.length)
+    : 0
+  const avgD7 = cohortData.length > 0
+    ? Math.round(cohortData.reduce((sum: number, c: any) => sum + (c.d7_rate || 0), 0) / cohortData.length)
     : 0
 
-  // Calculate retention trend from cohorts
-  const avgWeek1Retention = cohorts.length > 0
-    ? Math.round(cohorts.reduce((sum, c) => sum + (c.week1 || 0), 0) / cohorts.length)
+  // DAU trend calculations
+  const recentDAU = dailyActiveUsers.slice(-7)
+  const avgDAU = recentDAU.length > 0
+    ? Math.round(recentDAU.reduce((sum, d) => sum + d.dau, 0) / recentDAU.length)
+    : 0
+  const peakDAU = dailyActiveUsers.length > 0
+    ? Math.max(...dailyActiveUsers.map(d => d.dau))
     : 0
 
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Retention & Activity</h1>
-          <p className="text-xs sm:text-sm text-gray-500">User engagement patterns from PostHog + Supabase</p>
+          <h1 className="text-2xl font-bold text-gray-900">Retention & Stickiness</h1>
+          <p className="text-sm text-gray-500">Are users coming back? Are they staying?</p>
+          {totalMembers < 100 && (
+            <p className="text-xs text-amber-600 mt-1">* Beta data ({totalMembers} users) — directional metrics</p>
+          )}
         </div>
         <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
 
-      <EarlyDataBanner totalUsers={unifiedActive.totalMembers || metrics.totalUsers} />
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className={`rounded-xl p-6 text-white ${
+          retentionHealth === 'healthy' ? 'bg-gradient-to-r from-emerald-500 to-teal-600' :
+          retentionHealth === 'okay' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
+          'bg-gradient-to-r from-red-500 to-rose-600'
+        }`}>
+          <p className="text-white/80 text-sm font-medium">Weekly Activity Rate</p>
+          <p className="text-4xl font-bold mt-1">{activityRate}%</p>
+          <p className="text-white/70 text-sm mt-1">{activeMembers} of {totalMembers} active</p>
+        </div>
 
-      {/* North Star Metric */}
-      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg p-6 text-white mb-6">
-        <div className="flex justify-between items-start">
-          <div>
-            <p className="text-emerald-100 text-sm font-medium">KEY METRIC (UNIFIED DEFINITION)</p>
-            <div className="flex items-baseline gap-4 mt-1">
-              <span className="text-4xl font-bold">{unifiedActive.activeMembers || metrics.avgDAU}</span>
-              <span className="text-emerald-100">Weekly Active Members</span>
-            </div>
-            <p className="text-emerald-200 text-sm mt-2">
-              {unifiedActive.activityRate || metrics.stickiness}% of {unifiedActive.totalMembers || metrics.totalUsers} total members active (Supabase actions)
-            </p>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <p className="text-sm font-medium text-gray-500">D1 Retention</p>
+          <p className="text-4xl font-bold text-gray-900 mt-1">{avgD1}%</p>
+          <p className="text-sm text-gray-500 mt-1">Return next day</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <p className="text-sm font-medium text-gray-500">D7 Retention</p>
+          <p className="text-4xl font-bold text-gray-900 mt-1">{avgD7}%</p>
+          <p className="text-sm text-gray-500 mt-1">Return within week</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <p className="text-sm font-medium text-gray-500">Churned Users</p>
+          <p className="text-4xl font-bold text-red-600 mt-1">{churnedUsers}</p>
+          <p className="text-sm text-gray-500 mt-1">Inactive 14+ days</p>
+        </div>
+      </div>
+
+      {/* User Health Breakdown */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">User Health Breakdown</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="text-center p-4 bg-green-50 rounded-lg">
+            <p className="text-3xl font-bold text-green-600">{unifiedActive.newUserActive || 0}</p>
+            <p className="text-sm text-gray-600 mt-1">New & Active</p>
+            <p className="text-xs text-gray-500">Joined last 14 days, active this week</p>
           </div>
-          <ConfidenceBadge sampleSize={unifiedActive.sampleSize || metrics.avgDAU} />
+          <div className="text-center p-4 bg-blue-50 rounded-lg">
+            <p className="text-3xl font-bold text-blue-600">{unifiedActive.returningUserActive || 0}</p>
+            <p className="text-sm text-gray-600 mt-1">Returning</p>
+            <p className="text-xs text-gray-500">Joined 14+ days ago, still active</p>
+          </div>
+          <div className="text-center p-4 bg-amber-50 rounded-lg">
+            <p className="text-3xl font-bold text-amber-600">{resurrectedUsers}</p>
+            <p className="text-sm text-gray-600 mt-1">Resurrected</p>
+            <p className="text-xs text-gray-500">Were churned, came back ({resurrectionRate}%)</p>
+          </div>
+          <div className="text-center p-4 bg-red-50 rounded-lg">
+            <p className="text-3xl font-bold text-red-600">{churnedUsers}</p>
+            <p className="text-sm text-gray-600 mt-1">Churned</p>
+            <p className="text-xs text-gray-500">No activity in 14+ days</p>
+          </div>
         </div>
       </div>
 
-      {/* User Segmentation - New vs Returning */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">New Users Active</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.newUserActive || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">Joined last 14 days</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">Returning Active</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{unifiedActive.returningUserActive || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">Joined 14+ days ago</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">Resurrected</p>
-          <p className="text-2xl font-semibold text-green-600 mt-1">{resurrection.resurrectedUsers || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">{resurrection.resurrectionRate || 0}% of churned</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">Churned</p>
-          <p className="text-2xl font-semibold text-red-600 mt-1">{resurrection.churnedUsers || 0}</p>
-          <p className="text-xs text-gray-500 mt-1">Inactive 14+ days</p>
-        </div>
-      </div>
-
-      {/* WoW Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">This Week Total</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{metrics.thisWeekDAU}</p>
-          <p className={`text-sm mt-1 ${wowChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {wowChange >= 0 ? '+' : ''}{wowChange} ({wowPercent >= 0 ? '+' : ''}{wowPercent}%) vs last week
-          </p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">Last Week Total</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{metrics.lastWeekDAU}</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">Active Today</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{metrics.sessionsToday}</p>
-        </div>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <p className="text-sm font-medium text-gray-500">Peak DAU</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{metrics.peakDAU}</p>
-          <p className="text-xs text-gray-500 mt-1">{metrics.peakDate}</p>
-        </div>
-      </div>
-
-      {/* Charts Side by Side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* DAU Trend */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Daily Active Users</h2>
-            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">PostHog</span>
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Daily Active Users */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Daily Active Users</h2>
+              <p className="text-sm text-gray-500">From PostHog events</p>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-gray-900">{avgDAU}</p>
+              <p className="text-xs text-gray-500">7-day avg</p>
+            </div>
           </div>
           {dailyActiveUsers.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={dailyActiveUsers}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Area type="monotone" dataKey="dau" stroke="#10b981" fill="#10b981" fillOpacity={0.3} name="DAU" />
+                <Area type="monotone" dataKey="dau" stroke="#6366f1" fill="#6366f1" fillOpacity={0.3} name="DAU" />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-gray-500 text-center py-8">No activity data yet</p>
+            <p className="text-gray-400 text-center py-8">No PostHog data yet</p>
           )}
         </div>
 
-        {/* Week 1 Retention by Cohort */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-gray-900">Week 1 Retention</h2>
-              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Supabase</span>
+        {/* Cohort Retention */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Cohort D7 Retention</h2>
+              <p className="text-sm text-gray-500">By signup week</p>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-bold text-emerald-600">{avgWeek1Retention}%</p>
-              <p className="text-xs text-gray-500">Avg Retention</p>
+              <p className="text-2xl font-bold text-emerald-600">{avgD7}%</p>
+              <p className="text-xs text-gray-500">Average</p>
             </div>
           </div>
-          {cohorts.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={cohorts.slice(0, 6)}>
+          {cohortData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={cohortData.slice(0, 6)}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
-                  dataKey="cohort"
+                  dataKey="cohort_week"
                   tick={{ fontSize: 10 }}
                   tickFormatter={(v) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 />
                 <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} />
                 <Tooltip
                   formatter={(value: number) => `${value}%`}
-                  labelFormatter={(v) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  labelFormatter={(v) => `Week of ${new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                 />
-                <Bar dataKey="week1" fill="#10b981" name="Week 1 Retention %" />
+                <Bar dataKey="d7_rate" fill="#10b981" name="D7 Retention" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-gray-500 text-center py-8">Need more data for cohort analysis</p>
+            <p className="text-gray-400 text-center py-8">Need more data for cohort analysis</p>
           )}
         </div>
       </div>
 
-      {/* Cohort Retention Table */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Cohort Retention Matrix</h2>
-            <p className="text-sm text-gray-500">% of members active by week after joining</p>
-          </div>
-          {cohorts.length > 0 && cohorts.some(c => c.size < 30) && (
-            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
-              Some cohorts have low sample size
-            </span>
-          )}
-        </div>
-        {cohorts.length > 0 ? (
+      {/* Cohort Table */}
+      {cohortData.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Retention by Cohort</h2>
           <div className="overflow-x-auto">
             <table className="min-w-full">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cohort</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Week 0</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Week 1</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Week 2</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Week 3</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {cohorts.map((cohort: any, index: number) => (
-                  <tr key={index} className={cohort.size < 30 ? 'bg-amber-50' : ''}>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                      {new Date(cohort.cohort).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {cohort.size}
-                      {cohort.size < 30 && <span className="text-amber-600 ml-1">*</span>}
-                    </td>
-                    {['week0', 'week1', 'week2', 'week3'].map((week) => {
-                      const val = cohort[week] || 0
-                      const intensity = Math.min(val / 100, 1)
-                      const bgColor = val > 0 ? `rgba(16, 185, 129, ${intensity * 0.7 + 0.1})` : '#f9fafb'
-                      const textColor = intensity > 0.5 ? '#fff' : '#374151'
-                      return (
-                        <td
-                          key={week}
-                          className="px-4 py-3 text-sm text-center font-medium"
-                          style={{ backgroundColor: bgColor, color: textColor }}
-                        >
-                          {val > 0 ? `${val}%` : '-'}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">Need more data for cohort analysis</p>
-        )}
-      </div>
-
-      {/* Activity Log */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Daily Activity Log</h2>
-        {dailyActiveUsers.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Active Users</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% of Total</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Activity</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cohort Week</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Users</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">D1</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">D7</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Health</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {dailyActiveUsers.slice().reverse().slice(0, 14).map((row, index) => {
-                  const percent = metrics.totalUsers > 0 ? (row.dau / metrics.totalUsers) * 100 : 0
+                {cohortData.map((cohort: any, i: number) => {
+                  const d7Health = cohort.d7_rate >= 40 ? 'healthy' : cohort.d7_rate >= 20 ? 'okay' : 'low'
                   return (
-                    <tr key={index}>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.date}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right">{row.dau}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 text-right">{percent.toFixed(1)}%</td>
+                    <tr key={i} className={d7Health === 'low' ? 'bg-red-50' : ''}>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                        {new Date(cohort.cohort_week).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-600">
+                        {cohort.users}
+                        {cohort.users < 10 && <span className="text-amber-500 ml-1">*</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-center">
+                        <span className={`font-medium ${cohort.d1_rate >= 30 ? 'text-green-600' : cohort.d1_rate >= 15 ? 'text-amber-600' : 'text-red-600'}`}>
+                          {cohort.d1_rate || 0}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-center">
+                        <span className={`font-medium ${cohort.d7_rate >= 40 ? 'text-green-600' : cohort.d7_rate >= 20 ? 'text-amber-600' : 'text-red-600'}`}>
+                          {cohort.d7_rate || 0}%
+                        </span>
+                      </td>
                       <td className="px-4 py-3">
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-emerald-500 h-2 rounded-full"
-                            style={{ width: `${Math.min(percent * 2, 100)}%` }}
-                          />
-                        </div>
+                        {d7Health === 'healthy' ? (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Healthy</span>
+                        ) : d7Health === 'okay' ? (
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">Building</span>
+                        ) : (
+                          <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Needs work</span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -426,42 +328,170 @@ export default function RetentionPage() {
               </tbody>
             </table>
           </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">No data available</p>
-        )}
+          <p className="text-xs text-gray-500 mt-2">* Small cohort size — interpret with caution</p>
+        </div>
+      )}
+
+      {/* Questions & Hypotheses */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">📊 Questions to Answer</h2>
+
+        <div className="space-y-4">
+          <div className="border-l-4 border-indigo-500 pl-4">
+            <p className="font-medium text-gray-900">Are users coming back?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Answer:</strong> {avgD7}% D7 retention.
+              {avgD7 >= 40
+                ? " → Strong! Users are finding enough value to return."
+                : avgD7 >= 20
+                  ? " → Building. There's a core group of engaged users."
+                  : " → Low. Need to investigate why users aren't returning."}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-emerald-500 pl-4">
+            <p className="font-medium text-gray-900">Who churns and why?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> {churnedUsers} users churned (no activity in 14+ days).
+              {churnedUsers > totalMembers * 0.5
+                ? " → High churn rate. Consider: push notifications, email re-engagement, or checking for UX issues."
+                : churnedUsers > 0
+                  ? " → Some natural churn. Consider re-engagement campaigns."
+                  : " → No churn yet! Keep users engaged."}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-amber-500 pl-4">
+            <p className="font-medium text-gray-900">Can we bring users back?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> {resurrectionRate}% resurrection rate ({resurrectedUsers} users came back).
+              {resurrectionRate >= 10
+                ? " → Re-engagement is working! Double down on win-back campaigns."
+                : resurrectedUsers > 0
+                  ? " → Some users can be recovered. Test push notifications or email."
+                  : " → No resurrections yet. Build re-engagement flows."}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className={`rounded-lg p-4 ${(unifiedActive.activityRate || metrics.stickiness) >= 20 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
-          <h3 className={`font-semibold mb-1 ${(unifiedActive.activityRate || metrics.stickiness) >= 20 ? 'text-green-800' : 'text-amber-800'}`}>
-            Activity Rate
-          </h3>
-          <p className={`text-sm ${(unifiedActive.activityRate || metrics.stickiness) >= 20 ? 'text-green-700' : 'text-amber-700'}`}>
-            {(unifiedActive.activityRate || metrics.stickiness) >= 20
-              ? `${unifiedActive.activityRate || metrics.stickiness}% is healthy! Top community apps target 20%+.`
-              : `${unifiedActive.activityRate || metrics.stickiness}% is below 20% benchmark.`}
-          </p>
-        </div>
-        <div className={`rounded-lg p-4 ${(resurrection.resurrectionRate || 0) >= 10 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
-          <h3 className={`font-semibold mb-1 ${(resurrection.resurrectionRate || 0) >= 10 ? 'text-green-800' : 'text-amber-800'}`}>
-            Resurrection Rate
-          </h3>
-          <p className={`text-sm ${(resurrection.resurrectionRate || 0) >= 10 ? 'text-green-700' : 'text-amber-700'}`}>
-            {resurrection.resurrectionRate || 0}% of churned users came back.
-            {(resurrection.resurrectionRate || 0) >= 10
-              ? ' Re-engagement is working!'
-              : ' Consider win-back campaigns.'}
-          </p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 mb-1">Unified Definition</h3>
-          <p className="text-blue-700 text-sm">
-            Active = any Supabase action (post, like, comment, follow). Consistent across all pages.
-            {cohorts.some(c => c.size < 30) && ' * = cohort too small for confidence.'}
-          </p>
+      {/* Beta Hypotheses */}
+      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-6 border border-purple-100">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">🧪 Retention Hypotheses</h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${avgD7 >= 30 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H1: New content = return visits</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Users return when they see new posts from people they follow.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Compare D7 retention for users with 0 follows vs 3+ follows.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${resurrectionRate >= 10 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H2: Notifications drive retention</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Push notifications for likes/comments increase D7 retention.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Compare retention for users with notifications on vs off.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+              <p className="font-medium text-gray-900">H3: Studio events drive returns</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Users in studios with events have higher retention than those without.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Segment retention by studio event participation.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+              <p className="font-medium text-gray-900">H4: Weekly digests reduce churn</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Email digests of studio activity bring back inactive users.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: A/B test weekly email digest vs no email.
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* Recommendations */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">💡 Recommended Actions</h2>
+
+        <div className="space-y-3">
+          {avgD7 < 30 && (
+            <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
+              <span className="text-red-600 font-bold">1.</span>
+              <div>
+                <p className="font-medium text-gray-900">Improve D7 retention (currently {avgD7}%)</p>
+                <p className="text-sm text-gray-600">
+                  Focus on giving users reasons to return: push notifications, new content alerts, or daily digest emails.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {churnedUsers > totalMembers * 0.3 && (
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+              <span className="text-amber-600 font-bold">2.</span>
+              <div>
+                <p className="font-medium text-gray-900">Address high churn ({churnedUsers} users)</p>
+                <p className="text-sm text-gray-600">
+                  Build a re-engagement flow: "We miss you" emails, highlight what they're missing.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {resurrectionRate < 5 && churnedUsers > 0 && (
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+              <span className="text-amber-600 font-bold">3.</span>
+              <div>
+                <p className="font-medium text-gray-900">Build win-back campaigns</p>
+                <p className="text-sm text-gray-600">
+                  Only {resurrectionRate}% of churned users return. Test re-engagement emails or push notifications.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {avgD7 >= 40 && (
+            <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
+              <span className="text-green-600 font-bold">✓</span>
+              <div>
+                <p className="font-medium text-gray-900">Retention is healthy!</p>
+                <p className="text-sm text-gray-600">
+                  Focus on growing the top of funnel (more signups) while maintaining current retention.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-400 text-center">
+        DAU from PostHog events. Cohort retention from Supabase member activity.
+      </p>
     </div>
   )
 }

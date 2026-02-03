@@ -1,79 +1,40 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import {
-  FunnelChart,
-  Funnel,
-  LabelList,
-  ResponsiveContainer,
-  Tooltip,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from 'recharts'
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
-import { EarlyDataBanner } from '@/components/EarlyDataBanner'
-
-const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#c084fc', '#e879f9', '#f0abfc']
-
-function ConfidenceBadge({ sampleSize }: { sampleSize: number }) {
-  const isSignificant = sampleSize >= 30
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded ${isSignificant ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-      n={sampleSize} {isSignificant ? '(reliable)' : '(low confidence)'}
-    </span>
-  )
-}
 
 export default function FunnelPage() {
   const [dateRange, setDateRange] = useState('30')
   const [loading, setLoading] = useState(true)
-  const [posthogFunnel, setPosthogFunnel] = useState<any[]>([])
   const [unifiedFunnel, setUnifiedFunnel] = useState<any>({})
-  const [posthogConversion, setPosthogConversion] = useState(0)
+  const [posthogData, setPosthogData] = useState<any>({ loginStarted: 0, loginCompleted: 0 })
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true)
 
       try {
-        // Fetch both funnels in parallel
-        const [phRes, unifiedRes] = await Promise.all([
+        const [unifiedRes, phRes] = await Promise.all([
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'unifiedFunnel', days: parseInt(dateRange) }),
+          }),
           fetch('/api/posthog', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ queryType: 'events', days: parseInt(dateRange) }),
           }),
-          fetch('/api/supabase', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queryType: 'unifiedFunnel' }),
-          }),
         ])
 
+        if (unifiedRes.ok) setUnifiedFunnel(await unifiedRes.json())
         if (phRes.ok) {
           const phData = await phRes.json()
           const events = phData.results || []
-
-          const screenUsers = new Set(events.filter((e: any) => e.event === '$screen').map((e: any) => e.distinct_id))
-          const loginStartedUsers = new Set(events.filter((e: any) => e.event === 'login_started').map((e: any) => e.distinct_id))
-          const loginCompletedUsers = new Set(events.filter((e: any) => e.event === 'login_completed').map((e: any) => e.distinct_id))
-
-          const phFunnel = [
-            { name: 'Screen View', count: screenUsers.size, fill: COLORS[0] },
-            { name: 'Login Started', count: loginStartedUsers.size, fill: COLORS[1] },
-            { name: 'Login Completed', count: loginCompletedUsers.size, fill: COLORS[2] },
-          ]
-          setPosthogFunnel(phFunnel)
-
-          const conv = loginStartedUsers.size > 0 ? (loginCompletedUsers.size / loginStartedUsers.size) * 100 : 0
-          setPosthogConversion(Math.round(conv))
-        }
-
-        if (unifiedRes.ok) {
-          setUnifiedFunnel(await unifiedRes.json())
+          const loginStarted = new Set(events.filter((e: any) => e.event === 'login_started').map((e: any) => e.distinct_id)).size
+          const loginCompleted = new Set(events.filter((e: any) => e.event === 'login_completed').map((e: any) => e.distinct_id)).size
+          setPosthogData({ loginStarted, loginCompleted })
         }
       } catch (err) {
         console.error('Failed to fetch funnel data:', err)
@@ -93,253 +54,339 @@ export default function FunnelPage() {
     )
   }
 
-  const unifiedStages = unifiedFunnel.stages || []
-  const unifiedFunnelData = unifiedStages.map((stage: any, index: number) => ({
-    name: stage.name,
-    count: stage.count,
-    rate: stage.rate,
-    fill: COLORS[index % COLORS.length],
-  }))
+  const stages = unifiedFunnel.stages || []
+  const totalMembers = unifiedFunnel.totalMembers || 0
+  const activationRate = unifiedFunnel.activationRate || 0
 
-  // Calculate conversion stages for PostHog
-  const phConversionStages = posthogFunnel.slice(0, -1).map((stage, i) => {
-    const next = posthogFunnel[i + 1]
-    const rate = stage.count > 0 ? (next.count / stage.count) * 100 : 0
+  // Calculate dropoffs
+  const dropoffs = stages.slice(0, -1).map((stage: any, i: number) => {
+    const next = stages[i + 1]
+    const dropped = stage.count - next.count
+    const dropRate = stage.count > 0 ? Math.round((dropped / stage.count) * 100) : 0
     return {
-      transition: `${stage.name} → ${next.name}`,
-      rate: Math.round(rate),
-      converted: next.count,
-      dropped: stage.count - next.count,
+      from: stage.name,
+      to: next.name,
+      dropped,
+      dropRate,
+      conversionRate: 100 - dropRate,
     }
   })
 
-  // Calculate drop-off for unified funnel
-  const unifiedDropoffs = unifiedStages.slice(0, -1).map((stage: any, i: number) => {
-    const next = unifiedStages[i + 1]
-    const dropoff = stage.count - next.count
-    const dropoffRate = stage.count > 0 ? Math.round((dropoff / stage.count) * 100) : 0
-    return {
-      transition: `${stage.name} → ${next.name}`,
-      dropoff,
-      dropoffRate,
-      rate: 100 - dropoffRate,
-    }
-  })
-
-  // Find biggest drop-off
-  const biggestDropoff = unifiedDropoffs.reduce(
-    (max: any, d: any) => (d.dropoffRate > (max?.dropoffRate || 0) ? d : max),
+  // Find biggest dropoff
+  const biggestDropoff = dropoffs.reduce(
+    (max: any, d: any) => (d.dropRate > (max?.dropRate || 0) ? d : max),
     null
   )
 
+  // Login conversion rate
+  const loginConversion = posthogData.loginStarted > 0
+    ? Math.round((posthogData.loginCompleted / posthogData.loginStarted) * 100)
+    : 0
+
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">User Funnels</h1>
-          <p className="text-xs sm:text-sm text-gray-500">Unified journey from signup to retention</p>
+          <h1 className="text-2xl font-bold text-gray-900">Activation Funnel</h1>
+          <p className="text-sm text-gray-500">How new users become engaged community members</p>
+          {totalMembers < 100 && (
+            <p className="text-xs text-amber-600 mt-1">* Beta data ({totalMembers} users) — directional metrics</p>
+          )}
         </div>
         <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
         </div>
       </div>
 
-      <EarlyDataBanner totalUsers={unifiedFunnel.totalMembers || 0} />
-
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-lg p-6 text-white">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-indigo-100 text-sm font-medium">ACTIVATION RATE</p>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-4xl font-bold">{unifiedFunnel.activationRate || 0}%</span>
-              </div>
-              <p className="text-indigo-200 text-sm mt-1">Signed up → First Post</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className={`rounded-xl p-6 text-white ${activationRate >= 50 ? 'bg-gradient-to-r from-emerald-500 to-teal-600' : activationRate >= 30 ? 'bg-gradient-to-r from-amber-500 to-orange-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
+          <p className="text-white/80 text-sm font-medium">Activation Rate</p>
+          <p className="text-4xl font-bold mt-1">{activationRate}%</p>
+          <p className="text-white/70 text-sm mt-1">Signup → Engaged</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <p className="text-sm font-medium text-gray-500">Login Conversion</p>
+          <p className="text-4xl font-bold text-gray-900 mt-1">{loginConversion}%</p>
+          <p className="text-sm text-gray-500 mt-1">Started → Completed (PostHog)</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <p className="text-sm font-medium text-gray-500">Biggest Drop-off</p>
+          <p className="text-4xl font-bold text-red-600 mt-1">{biggestDropoff?.dropRate || 0}%</p>
+          <p className="text-sm text-gray-500 mt-1">{biggestDropoff?.from || 'N/A'} → {biggestDropoff?.to || 'N/A'}</p>
+        </div>
+      </div>
+
+      {/* Visual Funnel */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">User Journey</h2>
+
+        {stages.length > 0 ? (
+          <div className="space-y-4">
+            {stages.map((stage: any, i: number) => {
+              const isDropoff = i > 0 && stages[i-1].count - stage.count > stages[i-1].count * 0.3
+              const bgColor = isDropoff ? 'bg-red-100' : 'bg-indigo-100'
+              const barColor = isDropoff ? 'bg-red-500' : 'bg-indigo-500'
+
+              return (
+                <div key={i}>
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isDropoff ? 'bg-red-500 text-white' : 'bg-indigo-500 text-white'}`}>
+                        {i + 1}
+                      </span>
+                      <span className="font-medium text-gray-900">{stage.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-lg font-bold text-gray-900">{stage.count}</span>
+                      <span className="text-sm text-gray-500 ml-2">({stage.rate}%)</span>
+                    </div>
+                  </div>
+                  <div className={`w-full ${bgColor} rounded-full h-8`}>
+                    <div
+                      className={`${barColor} h-8 rounded-full flex items-center justify-end pr-3`}
+                      style={{ width: `${Math.max(stage.rate, 5)}%` }}
+                    >
+                      {stage.rate >= 15 && (
+                        <span className="text-white text-sm font-medium">{stage.rate}%</span>
+                      )}
+                    </div>
+                  </div>
+                  {i < stages.length - 1 && (
+                    <div className="flex items-center justify-center my-2">
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${
+                        dropoffs[i]?.dropRate > 40 ? 'bg-red-100 text-red-700' :
+                        dropoffs[i]?.dropRate > 20 ? 'bg-amber-100 text-amber-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        ↓ {dropoffs[i]?.dropRate || 0}% drop ({dropoffs[i]?.dropped || 0} users)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="text-gray-400 text-center py-8">Waiting for signups...</p>
+        )}
+      </div>
+
+      {/* Conversion Table */}
+      {stages.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Stage-by-Stage Conversion</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transition</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Converted</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Dropped</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Conversion %</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {dropoffs.map((d: any, i: number) => (
+                  <tr key={i} className={d.dropRate > 40 ? 'bg-red-50' : ''}>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{d.from} → {d.to}</td>
+                    <td className="px-4 py-3 text-sm text-right text-green-600">{stages[i+1]?.count || 0}</td>
+                    <td className="px-4 py-3 text-sm text-right text-red-600">-{d.dropped}</td>
+                    <td className="px-4 py-3 text-sm text-right font-medium">{d.conversionRate}%</td>
+                    <td className="px-4 py-3">
+                      {d.dropRate > 40 ? (
+                        <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Needs attention</span>
+                      ) : d.dropRate > 20 ? (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">Room to improve</span>
+                      ) : (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Healthy</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Questions & Hypotheses */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">📊 Questions to Answer</h2>
+
+        <div className="space-y-4">
+          <div className="border-l-4 border-indigo-500 pl-4">
+            <p className="font-medium text-gray-900">Where are we losing the most users?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Answer:</strong> {biggestDropoff
+                ? `${biggestDropoff.from} → ${biggestDropoff.to} loses ${biggestDropoff.dropRate}% of users (${biggestDropoff.dropped} people).`
+                : 'Need more data to identify.'
+              }
+              {biggestDropoff?.from === 'Profile Set' && biggestDropoff?.to === 'First Post' && (
+                <span className="block mt-1 text-amber-700">
+                  → Consider: guided first post prompt, template suggestions, or "what to share" tips.
+                </span>
+              )}
+              {biggestDropoff?.from === 'Signed Up' && biggestDropoff?.to === 'Profile Set' && (
+                <span className="block mt-1 text-amber-700">
+                  → Consider: simpler profile setup, skip option, or progressive profiling.
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-emerald-500 pl-4">
+            <p className="font-medium text-gray-900">What does "good" look like?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Benchmark:</strong> Community apps typically see 30-50% activation rates.
+              You're at <strong>{activationRate}%</strong>.
+              {activationRate >= 50
+                ? " → Excellent! Your onboarding is working well."
+                : activationRate >= 30
+                  ? " → Solid foundation. Focus on the biggest drop-off to improve."
+                  : " → Below benchmark. Prioritize onboarding improvements."}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-amber-500 pl-4">
+            <p className="font-medium text-gray-900">Is login friction a problem?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> {loginConversion}% of users who start login complete it.
+              {loginConversion >= 80
+                ? " → Login is smooth."
+                : loginConversion >= 60
+                  ? " → Some friction. Check for errors in login flow."
+                  : posthogData.loginStarted > 0
+                    ? " → High friction. Investigate auth errors or UX issues."
+                    : " → Need PostHog data to measure."}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Beta Hypotheses */}
+      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-6 border border-purple-100">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">🧪 Funnel Hypotheses</h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${(stages[2]?.rate || 0) >= 50 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H1: Posting is the activation moment</p>
             </div>
-            <ConfidenceBadge sampleSize={unifiedFunnel.totalMembers || 0} />
+            <p className="text-sm text-gray-600">
+              Users who make their first post within 48 hours are 2x more likely to become weekly active.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Track D7 retention for users who posted vs didn't post on D0.
+            </p>
           </div>
-        </div>
-        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg p-6 text-white">
-          <p className="text-emerald-100 text-sm font-medium">ENGAGEMENT RATE</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-4xl font-bold">{unifiedFunnel.engagementRate || 0}%</span>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`w-3 h-3 rounded-full ${(stages[3]?.rate || 0) >= 60 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H2: Getting a like = retention</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Users whose first post gets a like within 24 hours are more likely to return.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Measure if "time to first like" correlates with D7 retention.
+            </p>
           </div>
-          <p className="text-emerald-200 text-sm mt-1">First Post → Got Engagement</p>
-        </div>
-        <div className="bg-gradient-to-r from-violet-500 to-purple-600 rounded-lg p-6 text-white">
-          <p className="text-violet-100 text-sm font-medium">LOGIN CONVERSION</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-4xl font-bold">{posthogConversion}%</span>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+              <p className="font-medium text-gray-900">H3: Profiles increase engagement</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Users with complete profiles (photo + bio) get more followers.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Compare follow rates for complete vs incomplete profiles.
+            </p>
           </div>
-          <p className="text-violet-200 text-sm mt-1">Login Started → Completed (PostHog)</p>
+
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+              <p className="font-medium text-gray-900">H4: Studio members activate faster</p>
+            </div>
+            <p className="text-sm text-gray-600">
+              Users invited to a studio have higher activation than organic signups.
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Test: Segment funnel by acquisition source (studio invite vs direct).
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Data Quality Warning */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-        <h3 className="font-semibold text-amber-800 mb-1">Data Quality Note</h3>
-        <p className="text-amber-700 text-sm">
-          PostHog "Screen View" is not the same as "App Open". The unified funnel below uses Supabase member data
-          for accurate acquisition → activation → retention tracking. PostHog login funnel is shown separately for login-specific analysis.
-        </p>
-      </div>
+      {/* Recommendations */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">💡 Recommended Actions</h2>
 
-      {/* Unified Funnel (Primary) */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Unified User Journey</h2>
-            <p className="text-sm text-gray-500">Acquisition → Activation → Retention (Supabase)</p>
-          </div>
-          {biggestDropoff && (
-            <div className="text-right">
-              <p className="text-sm font-medium text-red-600">Biggest Drop: {biggestDropoff.dropoffRate}%</p>
-              <p className="text-xs text-gray-500">{biggestDropoff.transition}</p>
+        <div className="space-y-3">
+          {biggestDropoff?.dropRate > 30 && (
+            <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
+              <span className="text-red-600 font-bold">1.</span>
+              <div>
+                <p className="font-medium text-gray-900">Fix the {biggestDropoff.from} → {biggestDropoff.to} drop-off</p>
+                <p className="text-sm text-gray-600">
+                  {biggestDropoff.from === 'Profile Set' && 'Add a "Share your first piece" prompt after profile setup.'}
+                  {biggestDropoff.from === 'Signed Up' && 'Simplify profile setup or make it optional.'}
+                  {biggestDropoff.from === 'First Post' && 'Ensure new posts get engagement quickly (notifications, feed placement).'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {activationRate < 40 && (
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+              <span className="text-amber-600 font-bold">2.</span>
+              <div>
+                <p className="font-medium text-gray-900">Improve onboarding experience</p>
+                <p className="text-sm text-gray-600">
+                  Consider adding: welcome tutorial, example content, or suggested users to follow.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {loginConversion > 0 && loginConversion < 70 && (
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+              <span className="text-amber-600 font-bold">3.</span>
+              <div>
+                <p className="font-medium text-gray-900">Investigate login friction</p>
+                <p className="text-sm text-gray-600">
+                  Check PostHog for login error events. Consider social login options.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {activationRate >= 50 && (
+            <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
+              <span className="text-green-600 font-bold">✓</span>
+              <div>
+                <p className="font-medium text-gray-900">Activation is healthy!</p>
+                <p className="text-sm text-gray-600">
+                  Focus on retention and growing the top of funnel (more signups).
+                </p>
+              </div>
             </div>
           )}
         </div>
-
-        {unifiedFunnelData.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ResponsiveContainer width="100%" height={280}>
-              <FunnelChart>
-                <Tooltip
-                  formatter={(value: number, name: string, props: any) => [
-                    `${value} users (${props.payload.rate}%)`,
-                    props.payload.name
-                  ]}
-                />
-                <Funnel dataKey="count" data={unifiedFunnelData} isAnimationActive>
-                  <LabelList position="right" fill="#374151" stroke="none" dataKey="name" fontSize={11} />
-                  <LabelList position="center" fill="#fff" stroke="none" dataKey="count" fontSize={12} fontWeight="bold" />
-                </Funnel>
-              </FunnelChart>
-            </ResponsiveContainer>
-
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">Stage-by-Stage Drop-off</h3>
-              <div className="space-y-3">
-                {unifiedDropoffs.map((d: any, i: number) => (
-                  <div key={i}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">{d.transition}</span>
-                      <span className={d.dropoffRate > 50 ? 'text-red-600 font-medium' : 'text-amber-600 font-medium'}>
-                        -{d.dropoff} ({d.dropoffRate}% drop)
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full ${d.dropoffRate > 50 ? 'bg-red-500' : d.dropoffRate > 30 ? 'bg-amber-500' : 'bg-green-500'}`}
-                        style={{ width: `${d.rate}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">No funnel data yet</p>
-        )}
       </div>
 
-      {/* Funnel Stages Table */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Funnel Stage Details</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Users</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% of Total</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Drop-off</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Confidence</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {unifiedStages.map((stage: any, i: number) => (
-                <tr key={i} className={i > 0 && unifiedStages[i-1].count - stage.count > unifiedStages[i-1].count * 0.5 ? 'bg-red-50' : ''}>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{stage.name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 text-right">{stage.count}</td>
-                  <td className="px-4 py-3 text-sm text-right">{stage.rate}%</td>
-                  <td className="px-4 py-3 text-sm text-red-600 text-right">
-                    {i > 0 ? `-${unifiedStages[i-1].count - stage.count}` : '-'}
-                  </td>
-                  <td className="px-4 py-3">
-                    {stage.count >= 30 ? (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">reliable</span>
-                    ) : (
-                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">low sample</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* PostHog Login Funnel (Secondary) */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <div className="flex items-center gap-2 mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Login Funnel</h2>
-          <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">PostHog</span>
-        </div>
-        {posthogFunnel.length > 0 && posthogFunnel.some(s => s.count > 0) ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ResponsiveContainer width="100%" height={180}>
-              <FunnelChart>
-                <Tooltip formatter={(value: number) => value.toLocaleString()} />
-                <Funnel dataKey="count" data={posthogFunnel} isAnimationActive>
-                  <LabelList position="center" fill="#fff" stroke="none" dataKey="count" fontSize={14} fontWeight="bold" />
-                </Funnel>
-              </FunnelChart>
-            </ResponsiveContainer>
-            <div className="space-y-2">
-              {phConversionStages.map((stage, i) => (
-                <div key={i} className="flex justify-between text-sm">
-                  <span className="text-gray-600">{stage.transition}</span>
-                  <span className={stage.rate >= 50 ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>
-                    {stage.rate}% ({stage.dropped} dropped)
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-gray-500 text-center py-8">No login events yet</p>
-        )}
-      </div>
-
-      {/* Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className={`rounded-lg p-4 ${(unifiedFunnel.activationRate || 0) >= 30 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
-          <h3 className={`font-semibold mb-1 ${(unifiedFunnel.activationRate || 0) >= 30 ? 'text-green-800' : 'text-amber-800'}`}>
-            Activation Health
-          </h3>
-          <p className={`text-sm ${(unifiedFunnel.activationRate || 0) >= 30 ? 'text-green-700' : 'text-amber-700'}`}>
-            {(unifiedFunnel.activationRate || 0) >= 30
-              ? `${unifiedFunnel.activationRate}% activation is healthy for a community app.`
-              : `${unifiedFunnel.activationRate || 0}% is below 30% benchmark. Focus on first post experience.`}
-          </p>
-        </div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h3 className="font-semibold text-red-800 mb-1">Priority Fix</h3>
-          <p className="text-red-700 text-sm">
-            {biggestDropoff
-              ? `${biggestDropoff.transition} loses ${biggestDropoff.dropoffRate}% of users. Investigate this step.`
-              : 'Need more data to identify biggest drop-off.'}
-          </p>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-800 mb-1">Data Source</h3>
-          <p className="text-blue-700 text-sm">
-            Unified funnel uses Supabase member activity. PostHog login funnel tracks app-level auth events separately.
-          </p>
-        </div>
-      </div>
+      <p className="text-xs text-gray-400 text-center">
+        Funnel data from Supabase (member actions). Login events from PostHog.
+      </p>
     </div>
   )
 }
