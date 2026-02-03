@@ -99,6 +99,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(data || {})
       }
 
+      case 'websiteAnalytics': {
+        const { data, error } = await supabase.rpc('get_website_analytics', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
       default:
         return NextResponse.json({ error: 'Invalid query type' }, { status: 400 })
     }

@@ -23,10 +23,8 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 export default function WebsitePage() {
   const [dateRange, setDateRange] = useState('30')
   const [loading, setLoading] = useState(true)
-  const [pageViews, setPageViews] = useState<any[]>([])
-  const [trafficSources, setTrafficSources] = useState<any[]>([])
-  const [topPages, setTopPages] = useState<any[]>([])
-  const [deviceBreakdown, setDeviceBreakdown] = useState<any[]>([])
+  const [signupTrend, setSignupTrend] = useState<any[]>([])
+  const [platforms, setPlatforms] = useState<any[]>([])
   const [summary, setSummary] = useState<any>({})
 
   useEffect(() => {
@@ -34,58 +32,21 @@ export default function WebsitePage() {
       setLoading(true)
 
       try {
-        // Fetch website analytics from PostHog or dedicated endpoint
-        const [pageViewsRes, sourcesRes, pagesRes, devicesRes] = await Promise.all([
-          fetch('/api/posthog', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              queryType: 'websitePageViews',
-              days: parseInt(dateRange)
-            }),
+        // Fetch website analytics from Supabase
+        const res = await fetch('/api/supabase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            queryType: 'websiteAnalytics',
+            days: parseInt(dateRange)
           }),
-          fetch('/api/posthog', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              queryType: 'websiteTrafficSources',
-              days: parseInt(dateRange)
-            }),
-          }),
-          fetch('/api/posthog', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              queryType: 'websiteTopPages',
-              days: parseInt(dateRange)
-            }),
-          }),
-          fetch('/api/posthog', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              queryType: 'websiteDevices',
-              days: parseInt(dateRange)
-            }),
-          }),
-        ])
+        })
 
-        if (pageViewsRes.ok) {
-          const data = await pageViewsRes.json()
-          setPageViews(data.trend || [])
+        if (res.ok) {
+          const data = await res.json()
           setSummary(data.summary || {})
-        }
-        if (sourcesRes.ok) {
-          const data = await sourcesRes.json()
-          setTrafficSources(data.sources || [])
-        }
-        if (pagesRes.ok) {
-          const data = await pagesRes.json()
-          setTopPages(data.pages || [])
-        }
-        if (devicesRes.ok) {
-          const data = await devicesRes.json()
-          setDeviceBreakdown(data.devices || [])
+          setSignupTrend(data.trend || [])
+          setPlatforms(data.platforms || [])
         }
       } catch (err) {
         console.error('Failed to load website data:', err)
@@ -105,46 +66,41 @@ export default function WebsitePage() {
     )
   }
 
-  // Extract summary metrics
-  const totalPageViews = summary.totalPageViews || 0
-  const uniqueVisitors = summary.uniqueVisitors || 0
-  const avgSessionDuration = summary.avgSessionDuration || 0
-  const bounceRate = summary.bounceRate || 0
-  const appConversions = summary.appConversions || 0
-  const conversionRate = uniqueVisitors > 0
-    ? Math.round((appConversions / uniqueVisitors) * 100 * 10) / 10
-    : 0
-
-  // Week-over-week changes
-  const pageViewsChange = summary.pageViewsChange || 0
-  const visitorsChange = summary.visitorsChange || 0
-  const conversionChange = summary.conversionChange || 0
+  // Extract summary metrics from Supabase
+  const totalSignups = summary.totalSignups || 0
+  const betaSignups = summary.betaSignups || 0
+  const activatedUsers = summary.activatedUsers || 0
+  const activeUsers = summary.activeUsers || 0
+  const activationRate = summary.activationRate || 0
+  const weeklyChange = summary.weeklyChange || 0
+  const signupsThisWeek = summary.signupsThisWeek || 0
+  const signupsLastWeek = summary.signupsLastWeek || 0
+  const studioSignups = summary.studioSignups || 0
+  const iosSignups = summary.iosSignups || 0
+  const androidSignups = summary.androidSignups || 0
 
   // Calculate health indicators
-  const bounceHealth = bounceRate <= 40 ? 'healthy' : bounceRate <= 60 ? 'okay' : 'needs-attention'
-  const conversionHealth = conversionRate >= 5 ? 'healthy' : conversionRate >= 2 ? 'okay' : 'needs-attention'
+  const activationHealth = activationRate >= 70 ? 'healthy' : activationRate >= 40 ? 'okay' : 'needs-attention'
+  const growthHealth = weeklyChange >= 10 ? 'healthy' : weeklyChange >= 0 ? 'okay' : 'needs-attention'
 
-  // Pages per session
-  const pagesPerSession = uniqueVisitors > 0
-    ? Math.round((totalPageViews / uniqueVisitors) * 10) / 10
-    : 0
-
-  // Top referrer
-  const topReferrer = trafficSources.length > 0
-    ? trafficSources.reduce((max, s) => (s.visitors || 0) > (max.visitors || 0) ? s : max, trafficSources[0])
+  // Top platform
+  const topPlatform = platforms.length > 0
+    ? platforms.reduce((max, p) => (p.count || 0) > (max.count || 0) ? p : max, platforms[0])
     : null
 
   // Filter active days for chart
-  const activeDays = pageViews.filter(d => d.pageViews > 0 || d.visitors > 0)
+  const activeDays = signupTrend.filter(d => d.signups > 0)
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Website Analytics</h1>
-          <p className="text-sm text-gray-500">How is potteryfriends.com performing?</p>
-          <p className="text-xs text-amber-600 mt-1">* Website tracking recently added — data may be incomplete</p>
+          <h1 className="text-2xl font-bold text-gray-900">Website & Signups</h1>
+          <p className="text-sm text-gray-500">Beta signup funnel from potteryfriends.com</p>
+          {totalSignups < 50 && (
+            <p className="text-xs text-amber-600 mt-1">* Beta data ({totalSignups} signups) — directional metrics</p>
+          )}
         </div>
         <div className="w-full sm:w-40">
           <DateRangeSelect value={dateRange} onChange={setDateRange} />
@@ -154,41 +110,40 @@ export default function WebsitePage() {
       {/* Key Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 text-white">
-          <p className="text-white/80 text-sm font-medium">Page Views</p>
-          <p className="text-4xl font-bold mt-1">{totalPageViews.toLocaleString()}</p>
-          <p className={`text-sm mt-1 ${pageViewsChange >= 0 ? 'text-white/90' : 'text-red-200'}`}>
-            {pageViewsChange >= 0 ? '+' : ''}{pageViewsChange}% vs last period
+          <p className="text-white/80 text-sm font-medium">Beta Signups</p>
+          <p className="text-4xl font-bold mt-1">{totalSignups}</p>
+          <p className={`text-sm mt-1 ${weeklyChange >= 0 ? 'text-white/90' : 'text-red-200'}`}>
+            {weeklyChange >= 0 ? '+' : ''}{weeklyChange}% vs last week
           </p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <p className="text-sm font-medium text-gray-500">Unique Visitors</p>
-          <p className="text-4xl font-bold text-gray-900 mt-1">{uniqueVisitors.toLocaleString()}</p>
-          <p className={`text-sm mt-1 ${visitorsChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {visitorsChange >= 0 ? '+' : ''}{visitorsChange}% vs last period
+          <p className="text-sm font-medium text-gray-500">This Week</p>
+          <p className="text-4xl font-bold text-gray-900 mt-1">{signupsThisWeek}</p>
+          <p className="text-sm text-gray-500 mt-1">
+            vs {signupsLastWeek} last week
           </p>
         </div>
 
         <div className={`rounded-xl p-6 text-white ${
-          bounceHealth === 'healthy' ? 'bg-gradient-to-r from-emerald-500 to-teal-600' :
-          bounceHealth === 'okay' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
+          activationHealth === 'healthy' ? 'bg-gradient-to-r from-emerald-500 to-teal-600' :
+          activationHealth === 'okay' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
           'bg-gradient-to-r from-red-500 to-rose-600'
         }`}>
-          <p className="text-white/80 text-sm font-medium">Bounce Rate</p>
-          <p className="text-4xl font-bold mt-1">{bounceRate}%</p>
+          <p className="text-white/80 text-sm font-medium">Activation Rate</p>
+          <p className="text-4xl font-bold mt-1">{activationRate}%</p>
           <p className="text-white/70 text-sm mt-1">
-            {bounceHealth === 'healthy' ? 'Healthy' : bounceHealth === 'okay' ? 'Average' : 'High'}
+            {activatedUsers} created profiles
           </p>
         </div>
 
         <div className={`rounded-xl p-6 text-white ${
-          conversionHealth === 'healthy' ? 'bg-gradient-to-r from-emerald-500 to-teal-600' :
-          conversionHealth === 'okay' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
-          'bg-gradient-to-r from-red-500 to-rose-600'
+          activeUsers > 0 ? 'bg-gradient-to-r from-emerald-500 to-teal-600' :
+          'bg-gradient-to-r from-amber-500 to-orange-600'
         }`}>
-          <p className="text-white/80 text-sm font-medium">App Conversions</p>
-          <p className="text-4xl font-bold mt-1">{conversionRate}%</p>
-          <p className="text-white/70 text-sm mt-1">{appConversions} signups from web</p>
+          <p className="text-white/80 text-sm font-medium">Active This Week</p>
+          <p className="text-4xl font-bold mt-1">{activeUsers}</p>
+          <p className="text-white/70 text-sm mt-1">from beta signups</p>
         </div>
       </div>
 
@@ -197,11 +152,11 @@ export default function WebsitePage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
-              <span className="text-xl">📄</span>
+              <span className="text-xl"></span>
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{pagesPerSession}</p>
-              <p className="text-xs text-gray-500">Pages/Session</p>
+              <p className="text-2xl font-bold text-gray-900">{iosSignups}</p>
+              <p className="text-xs text-gray-500">iOS Signups</p>
             </div>
           </div>
         </div>
@@ -209,11 +164,11 @@ export default function WebsitePage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-              <span className="text-xl">⏱️</span>
+              <span className="text-xl">🤖</span>
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{avgSessionDuration}s</p>
-              <p className="text-xs text-gray-500">Avg Session</p>
+              <p className="text-2xl font-bold text-gray-900">{androidSignups}</p>
+              <p className="text-xs text-gray-500">Android Signups</p>
             </div>
           </div>
         </div>
@@ -221,11 +176,11 @@ export default function WebsitePage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-              <span className="text-xl">🔗</span>
+              <span className="text-xl">🏢</span>
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{topReferrer?.source || 'Direct'}</p>
-              <p className="text-xs text-gray-500">Top Referrer</p>
+              <p className="text-2xl font-bold text-gray-900">{studioSignups}</p>
+              <p className="text-xs text-gray-500">Studio Signups</p>
             </div>
           </div>
         </div>
@@ -237,9 +192,9 @@ export default function WebsitePage() {
             </div>
             <div>
               <p className="text-2xl font-bold text-gray-900">
-                {deviceBreakdown.find(d => d.device === 'Mobile')?.percentage || 0}%
+                {topPlatform?.platform || 'N/A'}
               </p>
-              <p className="text-xs text-gray-500">Mobile Traffic</p>
+              <p className="text-xs text-gray-500">Top Platform</p>
             </div>
           </div>
         </div>
@@ -247,9 +202,9 @@ export default function WebsitePage() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Traffic Trend */}
+        {/* Signup Trend */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Traffic Trend</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Signup Trend</h2>
           {activeDays.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
               <AreaChart data={activeDays}>
@@ -260,47 +215,39 @@ export default function WebsitePage() {
                 <Legend />
                 <Area
                   type="monotone"
-                  dataKey="pageViews"
+                  dataKey="signups"
                   stroke="#6366f1"
                   fill="#6366f1"
                   fillOpacity={0.3}
-                  name="Page Views"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="visitors"
-                  stroke="#10b981"
-                  fill="#10b981"
-                  fillOpacity={0.3}
-                  name="Visitors"
+                  name="Signups"
                 />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
             <div className="h-[250px] flex items-center justify-center text-gray-400">
-              No traffic data yet — tracking will populate this chart
+              No signup data yet
             </div>
           )}
         </div>
 
-        {/* Traffic Sources */}
+        {/* Platform Breakdown */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Traffic Sources</h2>
-          {trafficSources.length > 0 ? (
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Platform Breakdown</h2>
+          {platforms.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
                 <Pie
-                  data={trafficSources}
+                  data={platforms}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
                   outerRadius={90}
-                  dataKey="visitors"
-                  nameKey="source"
-                  label={({ source, percentage }) => `${source}: ${percentage}%`}
+                  dataKey="count"
+                  nameKey="platform"
+                  label={({ platform, count }) => `${platform}: ${count}`}
                   labelLine={false}
                 >
-                  {trafficSources.map((entry, index) => (
+                  {platforms.map((entry, index) => (
                     <Cell key={index} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -309,160 +256,80 @@ export default function WebsitePage() {
             </ResponsiveContainer>
           ) : (
             <div className="h-[250px] flex items-center justify-center text-gray-400">
-              No traffic source data yet
+              No platform data yet
             </div>
           )}
         </div>
       </div>
 
-      {/* Top Pages & Device Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Pages */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Top Pages</h2>
-          {topPages.length > 0 ? (
-            <div className="space-y-3">
-              {topPages.slice(0, 8).map((page, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      index < 3 ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-600'
-                    }`}>
-                      {index + 1}
-                    </span>
-                    <span className="text-sm text-gray-900 truncate">{page.path}</span>
-                  </div>
-                  <div className="text-right ml-2">
-                    <p className="text-sm font-medium text-gray-900">{page.views?.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500">views</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="h-[200px] flex items-center justify-center text-gray-400">
-              No page data yet
-            </div>
-          )}
-        </div>
-
-        {/* Device Breakdown */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Device Breakdown</h2>
-          {deviceBreakdown.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={deviceBreakdown} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" tick={{ fontSize: 12 }} />
-                <YAxis dataKey="device" type="category" tick={{ fontSize: 12 }} width={80} />
-                <Tooltip />
-                <Bar dataKey="visitors" fill="#6366f1" name="Visitors" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[200px] flex items-center justify-center text-gray-400">
-              No device data yet
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Conversion Funnels */}
+      {/* Signup Funnel */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Website Conversion Funnels</h2>
-        <p className="text-sm text-gray-500 mb-6">Track conversions across each audience segment</p>
-
-        {/* Funnel 1: Beta Testers → Users */}
-        <div className="mb-8">
-          <h3 className="text-md font-medium text-gray-800 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-sm">1</span>
-            Beta Testers → Active Users
-          </h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { label: 'Beta Signups', value: summary.betaSignups || 0, icon: '🧪', color: 'purple' },
-              { label: 'Activated', value: summary.betaActivated || 0, icon: '✅', color: 'indigo' },
-              { label: 'First Post', value: summary.betaFirstPost || 0, icon: '📝', color: 'blue' },
-              { label: 'Active Users', value: summary.betaActive || 0, icon: '🔥', color: 'emerald' },
-            ].map((step, index) => (
-              <div key={index} className="text-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-2xl mb-1">{step.icon}</span>
-                <p className="text-xl font-bold text-gray-900">{step.value}</p>
-                <p className="text-xs text-gray-500">{step.label}</p>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Beta Signup Funnel</h2>
+        <div className="space-y-4">
+          {[
+            { name: 'Beta Signups', count: totalSignups, rate: 100 },
+            { name: 'Created Profile', count: activatedUsers, rate: activationRate },
+            { name: 'Active This Week', count: activeUsers, rate: totalSignups > 0 ? Math.round((activeUsers / totalSignups) * 100) : 0 },
+          ].map((stage, i) => {
+            const isDropoff = i > 0 && stage.rate < 50
+            return (
+              <div key={i}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className={`font-medium ${isDropoff ? 'text-red-600' : 'text-gray-700'}`}>
+                    {stage.name}
+                  </span>
+                  <span className="text-gray-500">{stage.count} ({stage.rate}%)</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-3">
+                  <div
+                    className={`h-3 rounded-full ${isDropoff ? 'bg-red-400' : 'bg-indigo-500'}`}
+                    style={{ width: `${stage.rate}%` }}
+                  />
+                </div>
               </div>
-            ))}
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Conversion Summary */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Conversion Summary</h2>
+        <p className="text-sm text-gray-500 mb-6">Beta signup to active user journey</p>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="text-center p-4 bg-purple-50 rounded-lg">
+            <span className="text-3xl mb-2">🧪</span>
+            <p className="text-2xl font-bold text-gray-900">{betaSignups}</p>
+            <p className="text-xs text-gray-500">Beta Signups</p>
+            <p className="text-xs text-purple-600 mt-1">100%</p>
+          </div>
+
+          <div className="text-center p-4 bg-indigo-50 rounded-lg">
+            <span className="text-3xl mb-2">✅</span>
+            <p className="text-2xl font-bold text-gray-900">{activatedUsers}</p>
+            <p className="text-xs text-gray-500">Created Profile</p>
+            <p className="text-xs text-indigo-600 mt-1">{activationRate}%</p>
+          </div>
+
+          <div className="text-center p-4 bg-blue-50 rounded-lg">
+            <span className="text-3xl mb-2">🔥</span>
+            <p className="text-2xl font-bold text-gray-900">{activeUsers}</p>
+            <p className="text-xs text-gray-500">Active This Week</p>
+            <p className="text-xs text-blue-600 mt-1">
+              {totalSignups > 0 ? Math.round((activeUsers / totalSignups) * 100) : 0}%
+            </p>
+          </div>
+
+          <div className="text-center p-4 bg-emerald-50 rounded-lg">
+            <span className="text-3xl mb-2">🏢</span>
+            <p className="text-2xl font-bold text-gray-900">{studioSignups}</p>
+            <p className="text-xs text-gray-500">Studio Signups</p>
+            <p className="text-xs text-emerald-600 mt-1">
+              {totalSignups > 0 ? Math.round((studioSignups / totalSignups) * 100) : 0}% of total
+            </p>
           </div>
         </div>
-
-        {/* Funnel 2: Waitlist → Users */}
-        <div className="mb-8">
-          <h3 className="text-md font-medium text-gray-800 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-amber-100 rounded-full flex items-center justify-center text-sm">2</span>
-            Waitlisted → Active Users
-          </h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { label: 'Waitlist Signups', value: summary.waitlistTotal || 0, icon: '📋', color: 'amber' },
-              { label: 'Invited', value: summary.waitlistInvited || 0, icon: '📧', color: 'yellow' },
-              { label: 'Converted', value: summary.waitlistConverted || 0, icon: '👤', color: 'lime' },
-              { label: 'Active Users', value: summary.waitlistActive || 0, icon: '🔥', color: 'emerald' },
-            ].map((step, index) => (
-              <div key={index} className="text-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-2xl mb-1">{step.icon}</span>
-                <p className="text-xl font-bold text-gray-900">{step.value}</p>
-                <p className="text-xs text-gray-500">{step.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Funnel 3: Web Users → App Users */}
-        <div className="mb-8">
-          <h3 className="text-md font-medium text-gray-800 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-sm">3</span>
-            Web Users → App Users
-          </h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { label: 'Web Users', value: summary.webUsers || 0, icon: '🌐', color: 'blue' },
-              { label: 'Saw App Promo', value: summary.sawAppPromo || 0, icon: '👀', color: 'indigo' },
-              { label: 'Clicked Download', value: summary.clickedDownload || 0, icon: '⬇️', color: 'violet' },
-              { label: 'App Users', value: summary.appUsers || 0, icon: '📱', color: 'emerald' },
-            ].map((step, index) => (
-              <div key={index} className="text-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-2xl mb-1">{step.icon}</span>
-                <p className="text-xl font-bold text-gray-900">{step.value}</p>
-                <p className="text-xs text-gray-500">{step.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Funnel 4: Studios → Paying Customers */}
-        <div>
-          <h3 className="text-md font-medium text-gray-800 mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center text-sm">4</span>
-            Studios → Paying Customers 💰
-          </h3>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { label: 'Studio Leads', value: summary.studioLeads || 0, icon: '🏢', color: 'emerald' },
-              { label: 'Demo Requested', value: summary.studioDemos || 0, icon: '📞', color: 'teal' },
-              { label: 'Trial Started', value: summary.studioTrials || 0, icon: '🎯', color: 'cyan' },
-              { label: 'Paying', value: summary.studiosPaying || 0, icon: '💳', color: 'green' },
-            ].map((step, index) => (
-              <div key={index} className="text-center p-3 bg-gray-50 rounded-lg">
-                <span className="text-2xl mb-1">{step.icon}</span>
-                <p className="text-xl font-bold text-gray-900">{step.value}</p>
-                <p className="text-xs text-gray-500">{step.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <p className="text-xs text-gray-400 mt-6 text-center">
-          * Tracking being implemented. Values will populate as events are captured.
-        </p>
       </div>
 
       {/* Questions to Answer */}
@@ -473,52 +340,56 @@ export default function WebsitePage() {
           <div className="border-l-4 border-purple-500 pl-4">
             <p className="font-medium text-gray-900">Are beta testers converting to active users?</p>
             <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {summary.betaActivated || 0} of {summary.betaSignups || 0} beta testers activated.
-              {(summary.betaSignups || 0) > 0 && (summary.betaActivated || 0) / (summary.betaSignups || 1) >= 0.5
+              <strong>Signal:</strong> {activatedUsers} of {totalSignups} beta testers created profiles ({activationRate}%).
+              {activationRate >= 70
                 ? " → Great activation! Beta testers are finding value."
-                : " → Low activation. Check onboarding flow and first-time experience."}
-            </p>
-          </div>
-
-          <div className="border-l-4 border-amber-500 pl-4">
-            <p className="font-medium text-gray-900">Is the waitlist converting when invited?</p>
-            <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {summary.waitlistConverted || 0} of {summary.waitlistInvited || 0} invites converted.
-              {(summary.waitlistInvited || 0) > 0 && (summary.waitlistConverted || 0) / (summary.waitlistInvited || 1) >= 0.6
-                ? " → Strong! Waitlist members are eager to join."
-                : " → Some drop-off. Consider invite email optimization or immediate value demo."}
+                : activationRate >= 40
+                  ? " → Good progress. Some drop-off at onboarding."
+                  : " → Low activation. Check onboarding flow and first-time experience."}
             </p>
           </div>
 
           <div className="border-l-4 border-blue-500 pl-4">
-            <p className="font-medium text-gray-900">Are web users downloading the app?</p>
+            <p className="font-medium text-gray-900">Are activated users staying active?</p>
             <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {summary.appUsers || 0} web users converted to app.
-              {(summary.webUsers || 0) > 0 && (summary.appUsers || 0) / (summary.webUsers || 1) >= 0.3
-                ? " → Good crossover! Web users see app value."
-                : " → Low app adoption. Highlight app-only features or push notifications benefit."}
+              <strong>Signal:</strong> {activeUsers} of {activatedUsers} activated users are active this week.
+              {activatedUsers > 0 && (activeUsers / activatedUsers) >= 0.5
+                ? " → Strong retention! Users are engaged."
+                : " → Some users going dormant. Consider re-engagement campaigns."}
+            </p>
+          </div>
+
+          <div className="border-l-4 border-amber-500 pl-4">
+            <p className="font-medium text-gray-900">Which platform is driving signups?</p>
+            <p className="text-sm text-gray-600 mt-1">
+              <strong>Signal:</strong> iOS: {iosSignups}, Android: {androidSignups}.
+              {iosSignups > androidSignups
+                ? " → iOS dominant. Consider prioritizing iOS features."
+                : androidSignups > iosSignups
+                  ? " → Android dominant. Ensure Android experience is polished."
+                  : " → Even split. Support both platforms equally."}
             </p>
           </div>
 
           <div className="border-l-4 border-emerald-500 pl-4">
-            <p className="font-medium text-gray-900">Are studios converting to paid?</p>
+            <p className="font-medium text-gray-900">Are studios signing up?</p>
             <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {summary.studiosPaying || 0} paying studios from {summary.studioLeads || 0} leads.
-              {(summary.studioLeads || 0) > 0 && (summary.studiosPaying || 0) / (summary.studioLeads || 1) >= 0.1
-                ? " → Revenue funnel is working! Focus on lead generation."
-                : " → Pipeline needs work. Review studio value prop and pricing."}
+              <strong>Signal:</strong> {studioSignups} of {totalSignups} signups are from studios ({totalSignups > 0 ? Math.round((studioSignups / totalSignups) * 100) : 0}%).
+              {studioSignups > 0
+                ? " → Studios are interested! Follow up on studio features."
+                : " → No studio signups yet. Consider studio-focused marketing."}
             </p>
           </div>
 
           <div className="border-l-4 border-indigo-500 pl-4">
-            <p className="font-medium text-gray-900">Is website traffic growing?</p>
+            <p className="font-medium text-gray-900">Is signup rate growing?</p>
             <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {pageViewsChange >= 0 ? '+' : ''}{pageViewsChange}% page views, {visitorsChange >= 0 ? '+' : ''}{visitorsChange}% visitors vs last period.
-              {pageViewsChange >= 10
-                ? " → Traffic is growing! Keep marketing momentum."
-                : pageViewsChange >= -5
-                  ? " → Flat. Need more content marketing or paid channels."
-                  : " → Declining. Investigate traffic sources and SEO."}
+              <strong>Signal:</strong> {signupsThisWeek} this week vs {signupsLastWeek} last week ({weeklyChange >= 0 ? '+' : ''}{weeklyChange}%).
+              {weeklyChange >= 20
+                ? " → Great momentum! Keep marketing efforts going."
+                : weeklyChange >= 0
+                  ? " → Stable. Consider new channels to accelerate."
+                  : " → Declining. Investigate what changed."}
             </p>
           </div>
         </div>
@@ -692,7 +563,7 @@ export default function WebsitePage() {
       </div>
 
       <p className="text-xs text-gray-400 text-center">
-        Website analytics from PostHog. Data updates in real-time as tracking is implemented.
+        Beta signup data from Supabase. Updates in real-time.
       </p>
     </div>
   )
