@@ -26,27 +26,45 @@ export default function WebsitePage() {
   const [signupTrend, setSignupTrend] = useState<any[]>([])
   const [platforms, setPlatforms] = useState<any[]>([])
   const [summary, setSummary] = useState<any>({})
+  const [pageViews, setPageViews] = useState<any[]>([])
+  const [posthogSummary, setPosthogSummary] = useState<any>({})
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true)
 
       try {
-        // Fetch website analytics from Supabase
-        const res = await fetch('/api/supabase', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            queryType: 'websiteAnalytics',
-            days: parseInt(dateRange)
+        // Fetch from both Supabase (signups) and PostHog (pageviews)
+        const [supabaseRes, posthogRes] = await Promise.all([
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              queryType: 'websiteAnalytics',
+              days: parseInt(dateRange)
+            }),
           }),
-        })
+          fetch('/api/posthog', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              queryType: 'websitePageViews',
+              days: parseInt(dateRange)
+            }),
+          }),
+        ])
 
-        if (res.ok) {
-          const data = await res.json()
+        if (supabaseRes.ok) {
+          const data = await supabaseRes.json()
           setSummary(data.summary || {})
           setSignupTrend(data.trend || [])
           setPlatforms(data.platforms || [])
+        }
+
+        if (posthogRes.ok) {
+          const data = await posthogRes.json()
+          setPageViews(data.trend || [])
+          setPosthogSummary(data.summary || {})
         }
       } catch (err) {
         console.error('Failed to load website data:', err)
@@ -88,8 +106,14 @@ export default function WebsitePage() {
     ? platforms.reduce((max, p) => (p.count || 0) > (max.count || 0) ? p : max, platforms[0])
     : null
 
+  // PostHog metrics
+  const totalPageViews = posthogSummary.totalPageViews || 0
+  const uniqueVisitors = posthogSummary.uniqueVisitors || 0
+  const pageViewsChange = posthogSummary.pageViewsChange || 0
+
   // Filter active days for chart
   const activeDays = signupTrend.filter(d => d.signups > 0)
+  const activePageViewDays = pageViews.filter(d => d.pageViews > 0 || d.visitors > 0)
 
   return (
     <div className="space-y-6">
@@ -147,6 +171,35 @@ export default function WebsitePage() {
         </div>
       </div>
 
+      {/* Website Traffic (PostHog) */}
+      {(totalPageViews > 0 || uniqueVisitors > 0) && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">🌐 Website Traffic (PostHog)</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg p-4 shadow-sm text-center">
+              <p className="text-2xl font-bold text-gray-900">{totalPageViews.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">Page Views</p>
+            </div>
+            <div className="bg-white rounded-lg p-4 shadow-sm text-center">
+              <p className="text-2xl font-bold text-gray-900">{uniqueVisitors.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">Unique Visitors</p>
+            </div>
+            <div className="bg-white rounded-lg p-4 shadow-sm text-center">
+              <p className={`text-2xl font-bold ${pageViewsChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {pageViewsChange >= 0 ? '+' : ''}{pageViewsChange}%
+              </p>
+              <p className="text-xs text-gray-500">vs Last Period</p>
+            </div>
+            <div className="bg-white rounded-lg p-4 shadow-sm text-center">
+              <p className="text-2xl font-bold text-indigo-600">
+                {uniqueVisitors > 0 ? ((totalSignups / uniqueVisitors) * 100).toFixed(1) : 0}%
+              </p>
+              <p className="text-xs text-gray-500">Visitor → Signup</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Secondary Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
@@ -202,9 +255,45 @@ export default function WebsitePage() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Signup Trend */}
+        {/* Website Traffic Trend (PostHog) */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Signup Trend</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Website Traffic (PostHog)</h2>
+          {activePageViewDays.length > 0 ? (
+            <ResponsiveContainer width="100%" height={250}>
+              <AreaChart data={activePageViewDays}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="pageViews"
+                  stroke="#3b82f6"
+                  fill="#3b82f6"
+                  fillOpacity={0.3}
+                  name="Page Views"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="visitors"
+                  stroke="#10b981"
+                  fill="#10b981"
+                  fillOpacity={0.3}
+                  name="Visitors"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[250px] flex items-center justify-center text-gray-400">
+              No PostHog data yet — add tracking to potteryfriends.com
+            </div>
+          )}
+        </div>
+
+        {/* Signup Trend (Supabase) */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Signup Trend (Supabase)</h2>
           {activeDays.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
               <AreaChart data={activeDays}>
@@ -229,38 +318,23 @@ export default function WebsitePage() {
             </div>
           )}
         </div>
+      </div>
 
-        {/* Platform Breakdown */}
+      {/* Platform Breakdown */}
+      {platforms.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Platform Breakdown</h2>
-          {platforms.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={platforms}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  dataKey="count"
-                  nameKey="platform"
-                  label={({ platform, count }) => `${platform}: ${count}`}
-                  labelLine={false}
-                >
-                  {platforms.map((entry, index) => (
-                    <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[250px] flex items-center justify-center text-gray-400">
-              No platform data yet
-            </div>
-          )}
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={platforms} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" tick={{ fontSize: 12 }} />
+              <YAxis dataKey="platform" type="category" tick={{ fontSize: 12 }} width={80} />
+              <Tooltip />
+              <Bar dataKey="count" fill="#6366f1" name="Signups" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
-      </div>
+      )}
 
       {/* Signup Funnel */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -534,11 +608,11 @@ export default function WebsitePage() {
           </div>
 
           {/* Traffic Growth Action */}
-          {pageViewsChange < 10 && (
+          {weeklyChange < 10 && (
             <div className="flex items-start gap-3 p-3 bg-indigo-50 rounded-lg">
               <span className="text-indigo-600 font-bold">📈</span>
               <div>
-                <p className="font-medium text-gray-900">Grow website traffic</p>
+                <p className="font-medium text-gray-900">Grow website signups</p>
                 <p className="text-sm text-gray-600">
                   Create pottery-focused blog content for SEO. Partner with pottery YouTubers/Instagrammers.
                   Consider Pinterest (high pottery interest). Run targeted ads to pottery subreddits/forums.
@@ -547,14 +621,14 @@ export default function WebsitePage() {
             </div>
           )}
 
-          {bounceRate > 50 && (
+          {activationRate < 50 && totalSignups > 5 && (
             <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
               <span className="text-red-600 font-bold">⚠️</span>
               <div>
-                <p className="font-medium text-gray-900">Reduce bounce rate ({bounceRate}%)</p>
+                <p className="font-medium text-gray-900">Improve activation rate ({activationRate}%)</p>
                 <p className="text-sm text-gray-600">
-                  Improve above-fold: clear value prop, compelling pottery imagery, immediate CTA.
-                  Show social proof (member count, testimonials) immediately.
+                  Many signups aren't creating profiles. Improve onboarding email, simplify first steps,
+                  or add immediate value demonstration.
                 </p>
               </div>
             </div>
