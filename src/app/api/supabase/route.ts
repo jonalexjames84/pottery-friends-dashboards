@@ -16,31 +16,57 @@ export async function POST(request: NextRequest) {
 
     switch (queryType) {
       case 'overview': {
-        // Use secure database function that only returns aggregate counts
         const { data, error } = await supabase.rpc('get_dashboard_overview')
         if (error) throw error
         return NextResponse.json(data || {})
       }
 
       case 'engagementTrends': {
-        // Use secure database function for daily trends
         const { data, error } = await supabase.rpc('get_engagement_trends', { days_back: days })
         if (error) throw error
         return NextResponse.json({ trends: data || [] })
       }
 
       case 'studioStats': {
-        // Use secure database function for studio stats
         const { data, error } = await supabase.rpc('get_studio_stats')
         if (error) throw error
         return NextResponse.json({ studios: data || [] })
       }
 
       case 'memberGrowth': {
-        // Use secure database function for member growth
         const { data, error } = await supabase.rpc('get_member_growth', { days_back: days })
         if (error) throw error
         return NextResponse.json({ growth: data || [] })
+      }
+
+      case 'activeMembers': {
+        const { data, error } = await supabase.rpc('get_active_members', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'wowMetrics': {
+        const { data, error } = await supabase.rpc('get_wow_metrics')
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'activationFunnel': {
+        const { data, error } = await supabase.rpc('get_activation_funnel')
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'cohortRetention': {
+        const { data, error } = await supabase.rpc('get_cohort_retention')
+        if (error) throw error
+        return NextResponse.json({ cohorts: data || [] })
+      }
+
+      case 'studioHealth': {
+        const { data, error } = await supabase.rpc('get_studio_health')
+        if (error) throw error
+        return NextResponse.json({ studios: data || [] })
       }
 
       default:
