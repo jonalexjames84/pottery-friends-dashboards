@@ -76,19 +76,25 @@ export async function POST(request: NextRequest) {
       }
 
       case 'unifiedFunnel': {
-        const { data, error } = await supabase.rpc('get_unified_funnel')
+        const { data, error } = await supabase.rpc('get_unified_funnel', { days_back: days })
         if (error) throw error
         return NextResponse.json(data || {})
       }
 
       case 'engagementDistribution': {
-        const { data, error } = await supabase.rpc('get_engagement_distribution')
+        const { data, error } = await supabase.rpc('get_engagement_distribution', { days_back: days })
         if (error) throw error
         return NextResponse.json(data || {})
       }
 
       case 'resurrectionRate': {
-        const { data, error } = await supabase.rpc('get_resurrection_rate')
+        const { data, error } = await supabase.rpc('get_resurrection_rate', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'retentionCohorts': {
+        const { data, error } = await supabase.rpc('get_retention_cohorts', { days_back: days })
         if (error) throw error
         return NextResponse.json(data || {})
       }
