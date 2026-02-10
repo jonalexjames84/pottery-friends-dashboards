@@ -35,27 +35,43 @@ export default function ImpressionsPage() {
       setError(null)
 
       try {
-        const eventsRes = await fetch('/api/posthog', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ queryType: 'events', days: parseInt(dateRange) }),
-        })
+        const days = parseInt(dateRange)
 
-        if (!eventsRes.ok) throw new Error('Failed to fetch events')
-        const eventsData = await eventsRes.json()
-        const events = eventsData.results || []
+        // Use TrendsQuery endpoints that properly respect date ranges
+        const [screenViewsRes, uniqueUsersRes] = await Promise.all([
+          fetch('/api/posthog', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'screenViews', days }),
+          }),
+          fetch('/api/posthog', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'uniqueUsers', days }),
+          }),
+        ])
 
-        const screenEvents = events.filter((e: any) => e.event === '$screen')
-        const totalViews = screenEvents.length
-        const uniqueUserIds = new Set(screenEvents.map((e: any) => e.distinct_id))
-        const uniqueUsers = uniqueUserIds.size
+        if (!screenViewsRes.ok) throw new Error('Failed to fetch screen views')
+        if (!uniqueUsersRes.ok) throw new Error('Failed to fetch unique users')
 
-        // Group by date
+        const screenViewsData = await screenViewsRes.json()
+        const uniqueUsersData = await uniqueUsersRes.json()
+
+        const screenSeries = screenViewsData.results || []
+        const uniqueUsersSeries = uniqueUsersData.results || []
+
+        // Build daily totals from all screen breakdown series
         const dateMap = new Map<string, number>()
-        screenEvents.forEach((e: any) => {
-          const date = e.timestamp.split('T')[0]
-          dateMap.set(date, (dateMap.get(date) || 0) + 1)
-        })
+        for (const series of screenSeries) {
+          const dates = series.days || series.labels || []
+          const counts = series.data || []
+          for (let i = 0; i < dates.length; i++) {
+            const date = (dates[i] || '').split('T')[0]
+            if (date) {
+              dateMap.set(date, (dateMap.get(date) || 0) + (counts[i] || 0))
+            }
+          }
+        }
 
         const dailyData = Array.from(dateMap.entries())
           .map(([date, count]) => ({ date, views: count }))
@@ -63,29 +79,42 @@ export default function ImpressionsPage() {
 
         setScreenData(dailyData)
 
-        // Group by screen name
-        const screenMap = new Map<string, number>()
-        screenEvents.forEach((e: any) => {
-          const screenName = e.properties?.$screen_name || 'Unknown'
-          screenMap.set(screenName, (screenMap.get(screenName) || 0) + 1)
-        })
-
-        const breakdown = Array.from(screenMap.entries())
-          .map(([screen, count]) => ({ screen, views: count, percentage: ((count / totalViews) * 100).toFixed(1) }))
-          .sort((a, b) => b.views - a.views)
+        // Build screen breakdown from series
+        const totalViews = dailyData.reduce((sum, d) => sum + d.views, 0)
+        const breakdown = screenSeries
+          .map((series: any) => {
+            const views = (series.data || []).reduce((a: number, b: number) => a + b, 0)
+            return {
+              screen: series.breakdown_value || series.label || 'Unknown',
+              views,
+              percentage: totalViews > 0 ? ((views / totalViews) * 100).toFixed(1) : '0',
+            }
+          })
+          .filter((s: any) => s.views > 0)
+          .sort((a: any, b: any) => b.views - a.views)
 
         setScreenBreakdown(breakdown)
 
-        // Calculate WoW
+        // Get unique users total from the DAU series
+        const uniqueUsers = uniqueUsersSeries.length > 0
+          ? (uniqueUsersSeries[0].data || []).reduce((a: number, b: number) => a + b, 0)
+          : 0
+
+        // Calculate WoW from daily data
         const now = new Date()
         const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
         const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
 
-        const thisWeekViews = screenEvents.filter((e: any) => new Date(e.timestamp) >= oneWeekAgo).length
-        const lastWeekViews = screenEvents.filter((e: any) => {
-          const d = new Date(e.timestamp)
-          return d >= twoWeeksAgo && d < oneWeekAgo
-        }).length
+        let thisWeekViews = 0
+        let lastWeekViews = 0
+        for (const { date, views } of dailyData) {
+          const d = new Date(date)
+          if (d >= oneWeekAgo) {
+            thisWeekViews += views
+          } else if (d >= twoWeeksAgo && d < oneWeekAgo) {
+            lastWeekViews += views
+          }
+        }
 
         setMetrics({
           totalViews,

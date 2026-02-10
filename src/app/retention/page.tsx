@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  Cell,
 } from 'recharts'
 import { DateRangeSelect } from '@/components/DateRangeSelect'
 
@@ -22,45 +23,40 @@ export default function RetentionPage() {
   const [unifiedActive, setUnifiedActive] = useState<any>({})
   const [resurrection, setResurrection] = useState<any>({})
   const [retentionCohorts, setRetentionCohorts] = useState<any>({})
+  const [d0Engagement, setD0Engagement] = useState<any>({})
+  const [d1Retention, setD1Retention] = useState<any>({})
+  const [featureActivity, setFeatureActivity] = useState<any>({})
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true)
 
       try {
-        // Fetch PostHog events for DAU
-        const eventsRes = await fetch('/api/posthog', {
+        const days = parseInt(dateRange)
+
+        // Fetch PostHog DAU using TrendsQuery (properly respects date range)
+        const dauRes = await fetch('/api/posthog', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ queryType: 'events', days: parseInt(dateRange) }),
+          body: JSON.stringify({ queryType: 'dailyActiveUsers', days }),
         })
 
-        if (eventsRes.ok) {
-          const eventsData = await eventsRes.json()
-          const events = eventsData.results || []
+        if (dauRes.ok) {
+          const dauData = await dauRes.json()
+          const series = dauData.results?.[0] || {}
+          const dates = series.days || series.labels || []
+          const counts = series.data || []
 
-          // Group by date for daily active users
-          const dateUserMap = new Map<string, Set<string>>()
-          events.forEach((e: any) => {
-            const date = e.timestamp.split('T')[0]
-            if (!dateUserMap.has(date)) {
-              dateUserMap.set(date, new Set())
-            }
-            dateUserMap.get(date)!.add(e.distinct_id)
-          })
+          const dauTimeSeries = dates.map((d: string, i: number) => ({
+            date: (d || '').split('T')[0],
+            dau: counts[i] || 0,
+          })).filter((d: any) => d.date)
 
-          const dauData = Array.from(dateUserMap.entries())
-            .map(([date, users]) => ({
-              date,
-              dau: users.size,
-            }))
-            .sort((a, b) => a.date.localeCompare(b.date))
-
-          setDailyActiveUsers(dauData)
+          setDailyActiveUsers(dauTimeSeries)
         }
 
-        // Fetch Supabase data
-        const [cohortRes, unifiedRes, resRes, retCohortRes] = await Promise.all([
+        // Fetch all Supabase data in parallel
+        const [cohortRes, unifiedRes, resRes, retCohortRes, d0Res, d1Res, featureRes] = await Promise.all([
           fetch('/api/supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -81,6 +77,21 @@ export default function RetentionPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ queryType: 'retentionCohorts', days: 60 }),
           }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'd0Engagement', days }),
+          }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'd1RetentionByFeature', days: 60 }),
+          }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'newFeatureActivity', days }),
+          }),
         ])
 
         if (cohortRes.ok) {
@@ -90,6 +101,9 @@ export default function RetentionPage() {
         if (unifiedRes.ok) setUnifiedActive(await unifiedRes.json())
         if (resRes.ok) setResurrection(await resRes.json())
         if (retCohortRes.ok) setRetentionCohorts(await retCohortRes.json())
+        if (d0Res.ok) setD0Engagement(await d0Res.json())
+        if (d1Res.ok) setD1Retention(await d1Res.json())
+        if (featureRes.ok) setFeatureActivity(await featureRes.json())
       } catch (err) {
         console.error('Failed to load data:', err)
       } finally {
@@ -137,6 +151,40 @@ export default function RetentionPage() {
   const peakDAU = dailyActiveUsers.length > 0
     ? Math.max(...dailyActiveUsers.map(d => d.dau))
     : 0
+
+  // D0 engagement data
+  const d0Total = d0Engagement.total_new_users || 0
+  const d0AnyAction = d0Engagement.d0_any_action || 0
+  const d0Rate = d0Total > 0 ? Math.round((d0AnyAction / d0Total) * 100) : 0
+  const d0Trend = d0Engagement.daily_trend || []
+
+  // D1 retention by feature
+  const d1Segments = d1Retention.segments || []
+  const overallD1Rate = d1Retention.overall_d1_rate || 0
+
+  // New feature activity
+  const forum = featureActivity.forum || {}
+  const events = featureActivity.events || {}
+  const onboarding = featureActivity.onboarding || {}
+
+  // D0 engagement bar chart data
+  const d0BarData = [
+    { action: 'Posted', count: d0Engagement.d0_posted || 0, color: '#6366f1' },
+    { action: 'Liked', count: d0Engagement.d0_liked || 0, color: '#ec4899' },
+    { action: 'Followed', count: d0Engagement.d0_followed || 0, color: '#8b5cf6' },
+    { action: 'Commented', count: d0Engagement.d0_commented || 0, color: '#14b8a6' },
+    { action: 'Forum', count: d0Engagement.d0_forum_engaged || 0, color: '#f59e0b' },
+    { action: 'Event RSVP', count: d0Engagement.d0_event_engaged || 0, color: '#ef4444' },
+  ].filter(d => d.count > 0 || ['Forum', 'Event RSVP'].includes(d.action))
+
+  // D1 retention comparison chart data
+  const d1BarData = d1Segments
+    .filter((s: any) => s.users > 0)
+    .map((s: any) => ({
+      segment: s.segment.replace('D0 ', ''),
+      d1Rate: s.d1_rate || 0,
+      users: s.users,
+    }))
 
   return (
     <div className="space-y-6">
@@ -332,6 +380,277 @@ export default function RetentionPage() {
         </div>
       )}
 
+      {/* D0 Engagement & D1 Retention by Feature */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">D0 Engagement & Feature Impact on D1</h2>
+        <p className="text-sm text-gray-500 mb-4">What new users do on signup day and how it affects next-day return</p>
+
+        {/* D0 Summary Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-500">New Users ({dateRange}d)</p>
+            <p className="text-3xl font-bold text-gray-900">{d0Total}</p>
+          </div>
+          <div className={`rounded-lg p-4 shadow-sm ${d0Rate >= 60 ? 'bg-green-50' : d0Rate >= 40 ? 'bg-amber-50' : 'bg-red-50'}`}>
+            <p className="text-sm text-gray-500">D0 Activation Rate</p>
+            <p className={`text-3xl font-bold ${d0Rate >= 60 ? 'text-green-600' : d0Rate >= 40 ? 'text-amber-600' : 'text-red-600'}`}>{d0Rate}%</p>
+            <p className="text-xs text-gray-500">{d0AnyAction} took action on D0</p>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-500">Overall D1 Rate</p>
+            <p className="text-3xl font-bold text-indigo-600">{overallD1Rate}%</p>
+            <p className="text-xs text-gray-500">returned next day</p>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <p className="text-sm text-gray-500">Onboarding Completion</p>
+            <p className="text-3xl font-bold text-gray-900">{onboarding.profile_completion_rate || 0}%</p>
+            <p className="text-xs text-gray-500">completed profile setup</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          {/* D0 Action Breakdown */}
+          <div className="bg-white rounded-xl p-5 shadow-sm">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">What Users Do on D0</h3>
+            <p className="text-xs text-gray-500 mb-3">Actions taken on signup day (of {d0Total} new users)</p>
+            {d0BarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={d0BarData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" tick={{ fontSize: 12 }} />
+                  <YAxis dataKey="action" type="category" tick={{ fontSize: 11 }} width={80} />
+                  <Tooltip formatter={(value: number) => [`${value} users`, 'Count']} />
+                  <Bar dataKey="count" name="Users" radius={[0, 4, 4, 0]}>
+                    {d0BarData.map((entry, index) => (
+                      <Cell key={index} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-gray-400 text-center py-8">No D0 data yet</p>
+            )}
+          </div>
+
+          {/* D1 Retention by D0 Feature */}
+          <div className="bg-white rounded-xl p-5 shadow-sm">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">D1 Return Rate by D0 Action</h3>
+            <p className="text-xs text-gray-500 mb-3">Which D0 actions predict next-day return?</p>
+            {d1BarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={d1BarData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="segment" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [`${value}%`, 'D1 Rate']}
+                    labelFormatter={(label) => `D0 ${label} (n=${d1BarData.find((d: any) => d.segment === label)?.users || 0})`}
+                  />
+                  <Bar dataKey="d1Rate" name="D1 Rate" radius={[4, 4, 0, 0]}>
+                    {d1BarData.map((entry: any, index: number) => (
+                      <Cell key={index} fill={entry.d1Rate >= overallD1Rate ? '#10b981' : '#ef4444'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-gray-400 text-center py-8">Need more data for D1 analysis</p>
+            )}
+          </div>
+        </div>
+
+        {/* D0 Trend */}
+        {d0Trend.length > 1 && (
+          <div className="bg-white rounded-xl p-5 shadow-sm mb-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-1">D0 Activation Trend</h3>
+            <p className="text-xs text-gray-500 mb-3">New users vs those who take any action on signup day</p>
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={d0Trend}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="signup_date" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Area type="monotone" dataKey="new_users" stroke="#94a3b8" fill="#94a3b8" fillOpacity={0.2} name="New Users" />
+                <Area type="monotone" dataKey="any_action" stroke="#6366f1" fill="#6366f1" fillOpacity={0.3} name="D0 Active" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* D1 Insights */}
+        {d1Segments.length > 0 && (
+          <div className="bg-white rounded-xl p-5 shadow-sm">
+            <h3 className="text-base font-semibold text-gray-900 mb-3">D1 Retention Insights</h3>
+            <div className="space-y-2">
+              {d1Segments.filter((s: any) => s.users > 0).map((seg: any, i: number) => {
+                const rate = seg.d1_rate || 0
+                const isAboveAvg = rate > overallD1Rate
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-28 text-sm font-medium text-gray-700 shrink-0">{seg.segment.replace('D0 ', '')}</div>
+                    <div className="flex-1 bg-gray-100 rounded-full h-5 relative">
+                      <div
+                        className={`h-5 rounded-full ${isAboveAvg ? 'bg-emerald-400' : rate > 0 ? 'bg-red-400' : 'bg-gray-200'}`}
+                        style={{ width: `${Math.min(rate, 100)}%` }}
+                      />
+                      {overallD1Rate > 0 && (
+                        <div
+                          className="absolute top-0 h-5 w-0.5 bg-gray-900"
+                          style={{ left: `${Math.min(overallD1Rate, 100)}%` }}
+                          title={`Avg: ${overallD1Rate}%`}
+                        />
+                      )}
+                    </div>
+                    <div className="w-20 text-right text-sm shrink-0">
+                      <span className={`font-semibold ${isAboveAvg ? 'text-emerald-600' : rate > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                        {rate}%
+                      </span>
+                      <span className="text-gray-400 text-xs ml-1">n={seg.users}</span>
+                    </div>
+                  </div>
+                )
+              })}
+              <p className="text-xs text-gray-400 mt-2">Black line = overall D1 average ({overallD1Rate}%)</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* New Feature Activity */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">New Feature Adoption</h2>
+        <p className="text-sm text-gray-500 mb-4">Forum, Events, and Onboarding — tracking features that drive retention</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {/* Forum Card */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 font-bold text-sm">F</div>
+              <div>
+                <p className="font-semibold text-gray-900">Forum</p>
+                <p className="text-xs text-gray-500">{forum.unique_participants || 0} participants</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-lg font-bold text-gray-900">{forum.total_threads || 0}</p>
+                <p className="text-xs text-gray-500">Threads</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-gray-900">{forum.total_replies || 0}</p>
+                <p className="text-xs text-gray-500">Replies</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-gray-900">{forum.total_likes || 0}</p>
+                <p className="text-xs text-gray-500">Likes</p>
+              </div>
+            </div>
+            {(forum.total_threads || 0) + (forum.total_replies || 0) === 0 && (
+              <p className="text-xs text-amber-600 mt-2 text-center">Early stage — seed with discussion prompts</p>
+            )}
+          </div>
+
+          {/* Events Card */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold text-sm">E</div>
+              <div>
+                <p className="font-semibold text-gray-900">Events</p>
+                <p className="text-xs text-gray-500">{events.unique_rsvp_users || 0} unique RSVPs</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-lg font-bold text-gray-900">{events.total_events || 0}</p>
+                <p className="text-xs text-gray-500">Published</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-gray-900">{events.total_rsvps || 0}</p>
+                <p className="text-xs text-gray-500">RSVPs</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-gray-900">{events.upcoming_events || 0}</p>
+                <p className="text-xs text-gray-500">Upcoming</p>
+              </div>
+            </div>
+            {(events.total_rsvps || 0) > 0 && (
+              <p className="text-xs text-green-600 mt-2 text-center">
+                {((events.total_rsvps / Math.max(events.total_events, 1)) * 100).toFixed(0)}% RSVP rate per event
+              </p>
+            )}
+          </div>
+
+          {/* Onboarding Card */}
+          <div className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">W</div>
+              <div>
+                <p className="font-semibold text-gray-900">Welcome / Onboarding</p>
+                <p className="text-xs text-gray-500">Profile completion</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div>
+                <p className="text-lg font-bold text-gray-900">{onboarding.profile_completion_rate || 0}%</p>
+                <p className="text-xs text-gray-500">Completed Profile</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-gray-900">{onboarding.total_started || 0}</p>
+                <p className="text-xs text-gray-500">Started Onboarding</p>
+              </div>
+            </div>
+            {(onboarding.steps || []).length > 0 && (
+              <div className="mt-3 space-y-1">
+                {(onboarding.steps || []).map((step: any, i: number) => (
+                  <div key={i} className="flex justify-between text-xs">
+                    <span className="text-gray-600">{step.step}</span>
+                    <span className="text-gray-900 font-medium">{step.completed}/{step.total}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(onboarding.total_started || 0) === 0 && (onboarding.profile_completion_rate || 0) === 0 && (
+              <p className="text-xs text-amber-600 mt-2 text-center">No onboarding data yet — tracking will populate as users complete steps</p>
+            )}
+          </div>
+        </div>
+
+        {/* Events Daily Trend */}
+        {(events.daily_trend || []).some((d: any) => d.rsvps > 0 || d.events_created > 0) && (
+          <div className="mb-4">
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Events & RSVPs Over Time</h3>
+            <ResponsiveContainer width="100%" height={160}>
+              <AreaChart data={events.daily_trend || []}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" tick={{ fontSize: 10 }} tickFormatter={(v) => v?.split('T')?.[0]?.slice(5) || v} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip labelFormatter={(v) => v?.split('T')?.[0] || v} />
+                <Area type="monotone" dataKey="events_created" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} name="Events Created" />
+                <Area type="monotone" dataKey="rsvps" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.3} name="RSVPs" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Forum Daily Trend */}
+        {(forum.daily_trend || []).some((d: any) => d.threads > 0 || d.replies > 0 || d.likes > 0) && (
+          <div>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Forum Activity Over Time</h3>
+            <ResponsiveContainer width="100%" height={160}>
+              <AreaChart data={forum.daily_trend || []}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" tick={{ fontSize: 10 }} tickFormatter={(v) => v?.split('T')?.[0]?.slice(5) || v} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip labelFormatter={(v) => v?.split('T')?.[0] || v} />
+                <Area type="monotone" dataKey="threads" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.2} name="Threads" />
+                <Area type="monotone" dataKey="replies" stroke="#6366f1" fill="#6366f1" fillOpacity={0.3} name="Replies" />
+                <Area type="monotone" dataKey="likes" stroke="#ec4899" fill="#ec4899" fillOpacity={0.2} name="Likes" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
       {/* Questions & Hypotheses */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">📊 Questions to Answer</h2>
@@ -382,53 +701,57 @@ export default function RetentionPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white rounded-lg p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
-              <span className={`w-3 h-3 rounded-full ${avgD7 >= 30 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-              <p className="font-medium text-gray-900">H1: New content = return visits</p>
+              <span className={`w-3 h-3 rounded-full ${(d1Segments.find((s: any) => s.segment === 'D0 Posted')?.d1_rate || 0) > overallD1Rate ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H1: D0 posting drives D1 return</p>
             </div>
             <p className="text-sm text-gray-600">
-              Users return when they see new posts from people they follow.
+              Users who create a post on signup day are more likely to return.
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Test: Compare D7 retention for users with 0 follows vs 3+ follows.
+              Signal: D0 posters have {d1Segments.find((s: any) => s.segment === 'D0 Posted')?.d1_rate || 0}% D1 rate vs {overallD1Rate}% overall.
+              {(d1Segments.find((s: any) => s.segment === 'D0 Posted')?.users || 0) < 10 && ' (small sample)'}
             </p>
           </div>
 
           <div className="bg-white rounded-lg p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
-              <span className={`w-3 h-3 rounded-full ${resurrectionRate >= 10 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-              <p className="font-medium text-gray-900">H2: Notifications drive retention</p>
+              <span className={`w-3 h-3 rounded-full ${(events.total_rsvps || 0) > 0 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H2: Event RSVPs drive retention</p>
             </div>
             <p className="text-sm text-gray-600">
-              Push notifications for likes/comments increase D7 retention.
+              Users who RSVP to events have a reason to return (upcoming event).
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Test: Compare retention for users with notifications on vs off.
+              Signal: {events.total_rsvps || 0} RSVPs from {events.unique_rsvp_users || 0} users, {events.upcoming_events || 0} upcoming events.
+              {(events.total_rsvps || 0) === 0 ? ' Needs more adoption.' : ' Track D7 return rate for RSVP users.'}
             </p>
           </div>
 
           <div className="bg-white rounded-lg p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
-              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-              <p className="font-medium text-gray-900">H3: Studio events drive returns</p>
+              <span className={`w-3 h-3 rounded-full ${(forum.unique_participants || 0) > 0 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H3: Forum creates social investment</p>
             </div>
             <p className="text-sm text-gray-600">
-              Users in studios with events have higher retention than those without.
+              Users who participate in forum discussions build community ties that drive returns.
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Test: Segment retention by studio event participation.
+              Signal: {forum.unique_participants || 0} forum participants, {forum.total_replies || 0} replies.
+              {(forum.unique_participants || 0) === 0 ? ' Seed with discussion prompts to kickstart.' : ' Compare retention for forum users vs non-forum.'}
             </p>
           </div>
 
           <div className="bg-white rounded-lg p-4 shadow-sm">
             <div className="flex items-center gap-2 mb-2">
-              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-              <p className="font-medium text-gray-900">H4: Weekly digests reduce churn</p>
+              <span className={`w-3 h-3 rounded-full ${d0Rate >= 60 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+              <p className="font-medium text-gray-900">H4: Welcome flow lifts D0 activation</p>
             </div>
             <p className="text-sm text-gray-600">
-              Email digests of studio activity bring back inactive users.
+              Guided welcome experience increases D0 actions and downstream retention.
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Test: A/B test weekly email digest vs no email.
+              Signal: {d0Rate}% D0 activation rate ({d0AnyAction}/{d0Total} took action).
+              {d0Rate < 50 ? ' Below 50% — welcome flow should guide to first action.' : ' Good activation. Focus on converting D0 to D1.'}
             </p>
           </div>
         </div>
@@ -439,13 +762,49 @@ export default function RetentionPage() {
         <h2 className="text-lg font-semibold text-gray-900 mb-4">💡 Recommended Actions</h2>
 
         <div className="space-y-3">
-          {avgD7 < 30 && (
+          {d0Rate < 60 && d0Total > 0 && (
             <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
               <span className="text-red-600 font-bold">1.</span>
               <div>
+                <p className="font-medium text-gray-900">Boost D0 activation ({d0Rate}% → target 60%+)</p>
+                <p className="text-sm text-gray-600">
+                  {d0Total - d0AnyAction} of {d0Total} new users did nothing on signup day. The welcome flow should guide users to their first post, like, or follow within minutes.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {(forum.total_threads || 0) + (forum.total_replies || 0) < 5 && (
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+              <span className="text-amber-600 font-bold">2.</span>
+              <div>
+                <p className="font-medium text-gray-900">Seed the forum to drive engagement</p>
+                <p className="text-sm text-gray-600">
+                  Only {forum.total_replies || 0} replies and {forum.total_threads || 0} threads. Post weekly discussion prompts (e.g., "Show us your latest piece") to create return-worthy content.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {(events.total_rsvps || 0) > 0 && (events.total_rsvps || 0) < (events.total_events || 1) * 2 && (
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
+              <span className="text-amber-600 font-bold">3.</span>
+              <div>
+                <p className="font-medium text-gray-900">Increase event RSVP conversion</p>
+                <p className="text-sm text-gray-600">
+                  {events.total_events || 0} events but only {events.total_rsvps || 0} RSVPs. Surface events in the welcome flow and feed. Event anticipation is a strong retention hook.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {avgD7 < 30 && (
+            <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg">
+              <span className="text-red-600 font-bold">4.</span>
+              <div>
                 <p className="font-medium text-gray-900">Improve D7 retention (currently {avgD7}%)</p>
                 <p className="text-sm text-gray-600">
-                  Focus on giving users reasons to return: push notifications, new content alerts, or daily digest emails.
+                  Focus on giving users reasons to return: push notifications for forum replies, event reminders, and new content alerts.
                 </p>
               </div>
             </div>
@@ -453,29 +812,17 @@ export default function RetentionPage() {
 
           {churnedUsers > totalMembers * 0.3 && (
             <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
-              <span className="text-amber-600 font-bold">2.</span>
+              <span className="text-amber-600 font-bold">5.</span>
               <div>
                 <p className="font-medium text-gray-900">Address high churn ({churnedUsers} users)</p>
                 <p className="text-sm text-gray-600">
-                  Build a re-engagement flow: "We miss you" emails, highlight what they're missing.
+                  Build a re-engagement flow: "We miss you" emails, highlight new events and forum discussions they're missing.
                 </p>
               </div>
             </div>
           )}
 
-          {resurrectionRate < 5 && churnedUsers > 0 && (
-            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg">
-              <span className="text-amber-600 font-bold">3.</span>
-              <div>
-                <p className="font-medium text-gray-900">Build win-back campaigns</p>
-                <p className="text-sm text-gray-600">
-                  Only {resurrectionRate}% of churned users return. Test re-engagement emails or push notifications.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {avgD7 >= 40 && (
+          {avgD7 >= 40 && d0Rate >= 60 && (
             <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
               <span className="text-green-600 font-bold">✓</span>
               <div>

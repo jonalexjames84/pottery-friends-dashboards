@@ -105,6 +105,24 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(data || {})
       }
 
+      case 'd0Engagement': {
+        const { data, error } = await supabase.rpc('get_d0_engagement_breakdown', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'd1RetentionByFeature': {
+        const { data, error } = await supabase.rpc('get_d1_retention_by_feature', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
+      case 'newFeatureActivity': {
+        const { data, error } = await supabase.rpc('get_new_feature_activity', { days_back: days })
+        if (error) throw error
+        return NextResponse.json(data || {})
+      }
+
       default:
         return NextResponse.json({ error: 'Invalid query type' }, { status: 400 })
     }
