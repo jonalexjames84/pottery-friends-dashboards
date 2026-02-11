@@ -5,12 +5,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const navLinks = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/impressions', label: 'Impressions' },
-  { href: '/funnel', label: 'Funnel' },
+  { href: '/', label: 'Weekly Review' },
+  { href: '/reach', label: 'Reach' },
   { href: '/retention', label: 'Retention' },
-  { href: '/engagement', label: 'Engagement' },
-  { href: '/website', label: 'Website' },
+  { href: '/revenue', label: 'Revenue' },
 ]
 
 export function Navigation() {

@@ -3,42 +3,28 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
   PieChart,
   Pie,
   Cell,
+  Tooltip,
+  ResponsiveContainer,
 } from 'recharts'
 
-const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444']
-
-export default function Home() {
+export default function WeeklyReview() {
   const [loading, setLoading] = useState(true)
-  const [overview, setOverview] = useState<any>({})
   const [unifiedActive, setUnifiedActive] = useState<any>({})
   const [unifiedFunnel, setUnifiedFunnel] = useState<any>({})
   const [resurrection, setResurrection] = useState<any>({})
   const [wowMetrics, setWowMetrics] = useState<any>({})
-  const [studioHealth, setStudioHealth] = useState<any[]>([])
+  const [retentionCohorts, setRetentionCohorts] = useState<any>({})
+  const [websiteAnalytics, setWebsiteAnalytics] = useState<any>({})
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true)
 
       try {
-        const [overviewRes, activeRes, funnelRes, resRes, wowRes, healthRes] = await Promise.all([
-          fetch('/api/supabase', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queryType: 'overview' }),
-          }),
+        const [activeRes, funnelRes, resRes, wowRes, retRes, webRes] = await Promise.all([
           fetch('/api/supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -62,19 +48,21 @@ export default function Home() {
           fetch('/api/supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queryType: 'studioHealth' }),
+            body: JSON.stringify({ queryType: 'retentionCohorts', days: 60 }),
+          }),
+          fetch('/api/supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryType: 'websiteAnalytics' }),
           }),
         ])
 
-        if (overviewRes.ok) setOverview(await overviewRes.json())
         if (activeRes.ok) setUnifiedActive(await activeRes.json())
         if (funnelRes.ok) setUnifiedFunnel(await funnelRes.json())
         if (resRes.ok) setResurrection(await resRes.json())
         if (wowRes.ok) setWowMetrics(await wowRes.json())
-        if (healthRes.ok) {
-          const healthData = await healthRes.json()
-          setStudioHealth(Array.isArray(healthData) ? healthData : healthData.studios || [])
-        }
+        if (retRes.ok) setRetentionCohorts(await retRes.json())
+        if (webRes.ok) setWebsiteAnalytics(await webRes.json())
       } catch (err) {
         console.error('Failed to fetch:', err)
       } finally {
@@ -97,14 +85,29 @@ export default function Home() {
   const thisWeek = wowMetrics.thisWeek || {}
   const funnelStages = unifiedFunnel.stages || []
 
-  // Calculate key metrics
-  const totalMembers = unifiedActive.totalMembers || overview.totalMembers || 0
+  // Key metrics
+  const totalMembers = unifiedActive.totalMembers || 0
   const activeMembers = unifiedActive.activeMembers || 0
   const activityRate = unifiedActive.activityRate || 0
   const activationRate = unifiedFunnel.activationRate || 0
   const churnedUsers = resurrection.churnedUsers || 0
 
-  // User health breakdown for pie chart (matches the stats grid)
+  // Retention cohort averages
+  const cohortData = retentionCohorts.cohorts || []
+  const avgD1 = cohortData.length > 0
+    ? Math.round(cohortData.reduce((sum: number, c: any) => sum + (c.d1_rate || 0), 0) / cohortData.length)
+    : 0
+  const avgD7 = cohortData.length > 0
+    ? Math.round(cohortData.reduce((sum: number, c: any) => sum + (c.d7_rate || 0), 0) / cohortData.length)
+    : 0
+
+  // Website analytics
+  const webSummary = websiteAnalytics.summary || {}
+  const signupsThisWeek = webSummary.signupsThisWeek || 0
+  const weeklySignupChange = webSummary.weeklyChange || 0
+  const studioSignups = webSummary.studioSignups || 0
+
+  // User health breakdown for pie chart
   const newAndActive = unifiedActive.newUserActive || 0
   const returning = unifiedActive.returningUserActive || 0
   const inactive = Math.max(0, totalMembers - newAndActive - returning - churnedUsers)
@@ -116,7 +119,7 @@ export default function Home() {
     { name: 'Inactive', value: inactive, color: '#f59e0b' },
   ].filter(d => d.value > 0)
 
-  // Determine overall health status
+  // Health status
   const healthStatus = activityRate >= 40 ? 'healthy' : activityRate >= 20 ? 'okay' : 'needs-attention'
   const healthColors = {
     'healthy': 'from-emerald-500 to-teal-600',
@@ -128,14 +131,14 @@ export default function Home() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Pottery Friends Beta</h1>
-        <p className="text-gray-500 text-sm">Weekly Product Review — {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+        <h1 className="text-2xl font-bold text-gray-900">Weekly Review</h1>
+        <p className="text-gray-500 text-sm">Pottery Friends Beta — {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
         {totalMembers < 100 && (
           <p className="text-xs text-amber-600 mt-1">* Beta data ({totalMembers} users) — directional metrics</p>
         )}
       </div>
 
-      {/* North Star: Weekly Active Members */}
+      {/* Health Banner */}
       <div className={`bg-gradient-to-r ${healthColors[healthStatus]} rounded-xl p-6 text-white`}>
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
           <div>
@@ -160,7 +163,81 @@ export default function Home() {
         </div>
       </div>
 
-      {/* This Week's Numbers */}
+      {/* Goal Scorecards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Reach */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
+              <span className="text-indigo-600 font-bold text-sm">R</span>
+            </div>
+            <h3 className="font-semibold text-gray-900">Reach</h3>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">Signups this week</span>
+              <div className="text-right">
+                <span className="text-sm font-semibold text-gray-900">{signupsThisWeek}</span>
+                {weeklySignupChange !== 0 && (
+                  <span className={`text-xs ml-1 ${weeklySignupChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {weeklySignupChange >= 0 ? '+' : ''}{weeklySignupChange}%
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">Activation rate</span>
+              <span className="text-sm font-semibold text-gray-900">{activationRate}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Retention */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+              <span className="text-emerald-600 font-bold text-sm">R</span>
+            </div>
+            <h3 className="font-semibold text-gray-900">Retention</h3>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">D7 retention</span>
+              <span className={`text-sm font-semibold ${avgD7 >= 40 ? 'text-green-600' : avgD7 >= 20 ? 'text-amber-600' : 'text-red-600'}`}>{avgD7}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">D1 retention</span>
+              <span className="text-sm font-semibold text-gray-900">{avgD1}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">Churned</span>
+              <span className="text-sm font-semibold text-red-600">{churnedUsers}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Revenue */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
+              <span className="text-amber-600 font-bold text-sm">$</span>
+            </div>
+            <h3 className="font-semibold text-gray-900">Revenue</h3>
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">Studio signups</span>
+              <span className="text-sm font-semibold text-gray-900">{studioSignups}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-400 italic">MRR, subscriptions</span>
+              <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">Coming soon</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* This Week vs Last Week */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">This Week vs Last Week</h2>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
@@ -186,7 +263,7 @@ export default function Home() {
 
       {/* Two Column: Funnel + User Health */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Activation Funnel */}
+        {/* Activation Funnel (compact) */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex justify-between items-start mb-4">
             <div>
@@ -195,7 +272,7 @@ export default function Home() {
             </div>
             <div className="text-right">
               <p className="text-2xl font-bold text-indigo-600">{activationRate}%</p>
-              <p className="text-xs text-gray-500">reach "Engaged"</p>
+              <p className="text-xs text-gray-500">reach &quot;Engaged&quot;</p>
             </div>
           </div>
 
@@ -227,16 +304,16 @@ export default function Home() {
           )}
         </div>
 
-        {/* User Health */}
+        {/* User Health (compact) */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">User Health</h2>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div className="text-center">
-              <p className="text-2xl font-bold text-green-600">{unifiedActive.newUserActive || 0}</p>
+              <p className="text-2xl font-bold text-green-600">{newAndActive}</p>
               <p className="text-xs text-gray-500">New & Active</p>
             </div>
             <div className="text-center">
-              <p className="text-2xl font-bold text-blue-600">{unifiedActive.returningUserActive || 0}</p>
+              <p className="text-2xl font-bold text-blue-600">{returning}</p>
               <p className="text-xs text-gray-500">Returning</p>
             </div>
             <div className="text-center">
@@ -269,164 +346,45 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Studio Performance */}
-      {studioHealth && studioHealth.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-1">Studio Performance</h2>
-          <p className="text-sm text-gray-500 mb-4">Engagement per member by studio</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={studioHealth.slice(0, 5)} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" tick={{ fontSize: 12 }} />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={120} />
-              <Tooltip />
-              <Bar dataKey="engagementPerMember" fill="#6366f1" name="Engagement/Member" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* All-Time Totals */}
-      <div className="bg-gray-50 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">All-Time Totals</h2>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 text-center">
-          {[
-            { label: 'Members', value: overview.totalMembers || 0 },
-            { label: 'Studios', value: overview.totalStudios || 0 },
-            { label: 'Posts', value: overview.totalPosts || 0 },
-            { label: 'Likes', value: overview.totalLikes || 0 },
-            { label: 'Comments', value: overview.totalComments || 0 },
-            { label: 'Follows', value: overview.totalFollows || 0 },
-          ].map((stat) => (
-            <div key={stat.label}>
-              <p className="text-xl font-bold text-gray-900">{stat.value.toLocaleString()}</p>
-              <p className="text-xs text-gray-500">{stat.label}</p>
+      {/* Quick Nav */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link href="/reach" className="block p-5 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-100 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
+              <span className="text-indigo-600 font-bold">R</span>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Questions & Hypotheses Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">📊 Questions to Answer This Week</h2>
-
-        <div className="space-y-4">
-          <div className="border-l-4 border-indigo-500 pl-4">
-            <p className="font-medium text-gray-900">Are new users finding value quickly?</p>
-            <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {activationRate}% of new signups reach "Engaged" status.
-              {activationRate >= 50
-                ? " → Strong! Users are finding their aha moment."
-                : activationRate >= 30
-                  ? " → Okay, but room to improve onboarding."
-                  : " → Low. Consider guided first-post experience or better onboarding."}
-            </p>
-          </div>
-
-          <div className="border-l-4 border-emerald-500 pl-4">
-            <p className="font-medium text-gray-900">Is the community sticky?</p>
-            <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {activityRate}% weekly active rate, {churnedUsers} churned users.
-              {activityRate >= 40
-                ? " → Great retention! Community is engaging."
-                : activityRate >= 20
-                  ? " → Building. Focus on reasons to return (notifications, new content)."
-                  : " → Need habit-forming features. Consider push notifications or digest emails."}
-            </p>
-          </div>
-
-          <div className="border-l-4 border-amber-500 pl-4">
-            <p className="font-medium text-gray-900">Are studios driving engagement?</p>
-            <p className="text-sm text-gray-600 mt-1">
-              <strong>Signal:</strong> {overview.totalStudios || 0} studios with varying engagement levels.
-              {studioHealth.length > 0 && studioHealth[0].engagementPerMember > 10
-                ? ` → "${studioHealth[0].name}" is leading. Learn what they're doing right.`
-                : " → Studios need more activation. Consider studio leaderboards or challenges."}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Beta Hypotheses */}
-      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-6 border border-purple-100">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">🧪 Beta Hypotheses to Validate</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white rounded-lg p-4 shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`w-3 h-3 rounded-full ${activationRate >= 40 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-              <p className="font-medium text-gray-900">H1: First post = retention driver</p>
+            <div>
+              <p className="font-semibold text-gray-900">Reach</p>
+              <p className="text-xs text-gray-500">Website, signups, app store</p>
             </div>
-            <p className="text-sm text-gray-600">
-              If users post within 48hrs, they're more likely to return.
-            </p>
-            <p className="text-xs text-gray-500 mt-2">
-              Status: {funnelStages[2]?.count || 0} of {funnelStages[0]?.count || 0} made first post
-              ({funnelStages[2]?.rate || 0}%)
-            </p>
           </div>
-
-          <div className="bg-white rounded-lg p-4 shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`w-3 h-3 rounded-full ${(overview.totalFollows || 0) > totalMembers * 2 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-              <p className="font-medium text-gray-900">H2: Social connections = stickiness</p>
-            </div>
-            <p className="text-sm text-gray-600">
-              Users with 3+ follows have higher retention.
-            </p>
-            <p className="text-xs text-gray-500 mt-2">
-              Status: {overview.totalFollows || 0} total follows across {totalMembers} members
-              (avg {totalMembers > 0 ? ((overview.totalFollows || 0) / totalMembers).toFixed(1) : 0}/user)
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg p-4 shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`w-3 h-3 rounded-full ${studioHealth.some(s => s.memberCount >= 5) ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-              <p className="font-medium text-gray-900">H3: Studios create belonging</p>
-            </div>
-            <p className="text-sm text-gray-600">
-              Studio members engage more than non-studio members.
-            </p>
-            <p className="text-xs text-gray-500 mt-2">
-              Status: {overview.totalStudios || 0} studios, largest has{' '}
-              {studioHealth.length > 0 ? studioHealth[0].memberCount || 0 : 0} members
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg p-4 shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`w-3 h-3 rounded-full ${(overview.totalLikes || 0) > (overview.totalPosts || 1) * 3 ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-              <p className="font-medium text-gray-900">H4: Engagement begets engagement</p>
-            </div>
-            <p className="text-sm text-gray-600">
-              Posts that get likes get more comments.
-            </p>
-            <p className="text-xs text-gray-500 mt-2">
-              Status: {overview.totalLikes || 0} likes, {overview.totalComments || 0} comments on{' '}
-              {overview.totalPosts || 0} posts
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Link href="/funnel" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Funnel Deep Dive</p>
-          <p className="text-xs text-gray-500">Conversion analysis</p>
+          <p className="text-sm text-gray-600">Are we getting in front of people?</p>
         </Link>
-        <Link href="/retention" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Retention</p>
-          <p className="text-xs text-gray-500">Cohort analysis</p>
+
+        <Link href="/retention" className="block p-5 bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl border border-emerald-100 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+              <span className="text-emerald-600 font-bold">R</span>
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900">Retention</p>
+              <p className="text-xs text-gray-500">Cohorts, engagement, stickiness</p>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600">Are users sticking around?</p>
         </Link>
-        <Link href="/engagement" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Engagement</p>
-          <p className="text-xs text-gray-500">Activity metrics</p>
-        </Link>
-        <Link href="/impressions" className="block p-4 bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-          <p className="font-medium text-gray-900">Screen Views</p>
-          <p className="text-xs text-gray-500">PostHog data</p>
+
+        <Link href="/revenue" className="block p-5 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-100 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+              <span className="text-amber-600 font-bold">$</span>
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900">Revenue</p>
+              <p className="text-xs text-gray-500">Studios, monetization</p>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600">Are we making money?</p>
         </Link>
       </div>
 

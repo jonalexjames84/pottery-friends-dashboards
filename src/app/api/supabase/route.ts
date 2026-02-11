@@ -123,6 +123,59 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(data || {})
       }
 
+      case 'impressions': {
+        const startDate = new Date()
+        startDate.setDate(startDate.getDate() - days)
+        const { data, error } = await supabase
+          .from('impressions')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: true })
+        if (error) throw error
+        const rows = (data || []) as { created_at: string; platform: string; count: number }[]
+        // Group by date and platform
+        const byDate = new Map<string, { date: string; iOS: number; Android: number; Web: number; total: number }>()
+        for (const row of rows) {
+          const date = row.created_at.split('T')[0]
+          if (!byDate.has(date)) byDate.set(date, { date, iOS: 0, Android: 0, Web: 0, total: 0 })
+          const entry = byDate.get(date)!
+          const platform = row.platform as 'iOS' | 'Android' | 'Web'
+          entry[platform] = (entry[platform] || 0) + row.count
+          entry.total += row.count
+        }
+        const trend = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+        const totalImpressions = rows.reduce((sum, r) => sum + r.count, 0)
+        const platformTotals = { iOS: 0, Android: 0, Web: 0 }
+        for (const r of rows) { platformTotals[r.platform as keyof typeof platformTotals] += r.count }
+        return NextResponse.json({ trend, total: totalImpressions, platforms: platformTotals })
+      }
+
+      case 'installs': {
+        const startDate = new Date()
+        startDate.setDate(startDate.getDate() - days)
+        const { data, error } = await supabase
+          .from('installs')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: true })
+        if (error) throw error
+        const rows = (data || []) as { created_at: string; platform: string; count: number }[]
+        const byDate = new Map<string, { date: string; iOS: number; Android: number; Web: number; total: number }>()
+        for (const row of rows) {
+          const date = row.created_at.split('T')[0]
+          if (!byDate.has(date)) byDate.set(date, { date, iOS: 0, Android: 0, Web: 0, total: 0 })
+          const entry = byDate.get(date)!
+          const platform = row.platform as 'iOS' | 'Android' | 'Web'
+          entry[platform] = (entry[platform] || 0) + row.count
+          entry.total += row.count
+        }
+        const trend = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+        const totalInstalls = rows.reduce((sum, r) => sum + r.count, 0)
+        const platformTotals = { iOS: 0, Android: 0, Web: 0 }
+        for (const r of rows) { platformTotals[r.platform as keyof typeof platformTotals] += r.count }
+        return NextResponse.json({ trend, total: totalInstalls, platforms: platformTotals })
+      }
+
       default:
         return NextResponse.json({ error: 'Invalid query type' }, { status: 400 })
     }
