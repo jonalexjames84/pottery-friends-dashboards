@@ -9,6 +9,7 @@ const navLinks = [
   { href: '/reach', label: 'Reach' },
   { href: '/retention', label: 'Retention' },
   { href: '/revenue', label: 'Revenue' },
+  { href: '/archive', label: 'Archive', muted: true },
 ]
 
 export function Navigation() {
@@ -32,10 +33,14 @@ export function Navigation() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                  pathname === link.href
+                className={`px-3 py-2 rounded-md transition-colors ${
+                  link.muted ? 'text-xs font-normal' : 'text-sm font-medium'
+                } ${
+                  pathname === link.href || (link.href === '/archive' && pathname.startsWith('/archive'))
                     ? 'text-indigo-600 bg-indigo-50'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    : link.muted
+                      ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
                 {link.label}
@@ -77,10 +82,14 @@ export function Navigation() {
               key={link.href}
               href={link.href}
               onClick={() => setIsOpen(false)}
-              className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                pathname === link.href
+              className={`block px-3 py-2 rounded-md transition-colors ${
+                link.muted ? 'text-sm font-normal' : 'text-base font-medium'
+              } ${
+                pathname === link.href || (link.href === '/archive' && pathname.startsWith('/archive'))
                   ? 'text-indigo-600 bg-indigo-50'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  : link.muted
+                    ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
               {link.label}
